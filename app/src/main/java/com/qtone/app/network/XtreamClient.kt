@@ -1,0 +1,270 @@
+package com.qtone.app.network
+
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.qtone.app.model.Category
+import com.qtone.app.model.Credentials
+import com.qtone.app.model.MediaItem
+import com.qtone.app.model.SeriesEpisode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+
+class XtreamClient {
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    suspend fun login(creds: Credentials): Boolean = withContext(Dispatchers.IO) {
+        val obj = getJson(creds, null) as? JsonObject ?: return@withContext false
+        val userInfo = obj.getAsJsonObject("user_info") ?: return@withContext false
+        userInfo.get("auth")?.asInt == 1
+    }
+
+    suspend fun getAccountExpirationMs(creds: Credentials): Long? = withContext(Dispatchers.IO) {
+        val obj = getJson(creds, null) as? JsonObject ?: return@withContext null
+        val userInfo = obj.getAsJsonObject("user_info") ?: return@withContext null
+        val raw = userInfo.str("exp_date")
+            ?: userInfo.str("expiration")
+            ?: userInfo.str("expires")
+            ?: return@withContext null
+
+        val value = raw.trim().toLongOrNull() ?: return@withContext null
+        if (value <= 0L) null else if (value > 9_999_999_999L) value else value * 1000L
+    }
+
+    suspend fun getLiveCategories(creds: Credentials): List<Category> =
+        categories(creds, "get_live_categories")
+
+    suspend fun getMovieCategories(creds: Credentials): List<Category> =
+        categories(creds, "get_vod_categories")
+
+    suspend fun getSeriesCategories(creds: Credentials): List<Category> =
+        categories(creds, "get_series_categories")
+
+    suspend fun getLiveStreams(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
+        val arr = getJson(creds, "get_live_streams") as? JsonArray ?: return@withContext emptyList()
+        arr.mapNotNull { e ->
+            val o = e.asJsonObject
+            val id = o.str("stream_id") ?: return@mapNotNull null
+            MediaItem(
+                id = id,
+                name = o.str("name") ?: "Channel",
+                streamType = "live",
+                categoryId = o.str("category_id") ?: "",
+                poster = o.str("stream_icon"),
+                streamUrl = "${creds.server.trimEnd('/')}/live/${creds.username}/${creds.password}/$id.ts"
+            )
+        }
+    }
+
+    suspend fun getMovies(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
+        val arr = getJson(creds, "get_vod_streams") as? JsonArray ?: return@withContext emptyList()
+        arr.mapNotNull { e ->
+            val o = e.asJsonObject
+            val id = o.str("stream_id") ?: return@mapNotNull null
+            MediaItem(
+                id = id,
+                name = o.str("name") ?: "Movie",
+                streamType = "movie",
+                categoryId = o.str("category_id") ?: "",
+                poster = o.str("stream_icon"),
+                rating = o.str("rating"),
+                year = o.str("year") ?: o.str("release_date")?.take(4),
+                plot = o.str("plot") ?: o.str("description"),
+                genre = o.str("genre"),
+                director = o.str("director"),
+                cast = o.str("cast"),
+                addedAt = o.addedTimestamp(),
+                streamUrl = "${creds.server.trimEnd('/')}/movie/${creds.username}/${creds.password}/$id.${o.str("container_extension") ?: o.str("containerExtension") ?: "mp4"}"
+            )
+        }
+    }
+
+
+    suspend fun getVodInfo(creds: Credentials, vodId: String): MediaItem? = withContext(Dispatchers.IO) {
+        val root = getJson(creds, "get_vod_info&vod_id=$vodId") as? JsonObject ?: return@withContext null
+        val info = root.getAsJsonObject("info") ?: root
+
+        MediaItem(
+            id = vodId,
+            name = info.str("name") ?: info.str("movie_name") ?: "Movie",
+            streamType = "movie",
+            categoryId = "",
+            poster = info.str("movie_image") ?: info.str("cover_big") ?: info.str("cover") ?: info.str("stream_icon"),
+            backdrop = info.firstStringFromArrayOrPrimitive("backdrop_path"),
+            rating = info.str("rating"),
+            year = info.str("releasedate")?.take(4) ?: info.str("release_date")?.take(4) ?: info.str("year"),
+            plot = info.str("plot") ?: info.str("description"),
+            genre = info.str("genre"),
+            director = info.str("director"),
+            cast = info.str("cast"),
+            addedAt = info.addedTimestamp()
+        )
+    }
+
+    suspend fun getSeries(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
+        val arr = getJson(creds, "get_series") as? JsonArray ?: return@withContext emptyList()
+        arr.mapNotNull { e ->
+            val o = e.asJsonObject
+            val id = o.str("series_id") ?: return@mapNotNull null
+            MediaItem(
+                id = id,
+                name = o.str("name") ?: "Series",
+                streamType = "series",
+                categoryId = o.str("category_id") ?: "",
+                poster = o.str("cover") ?: o.str("stream_icon"),
+                backdrop = o.firstStringFromArrayOrPrimitive("backdrop_path"),
+                rating = o.str("rating"),
+                year = o.str("releaseDate")?.take(4),
+                plot = o.str("plot"),
+                genre = o.str("genre"),
+                director = o.str("director"),
+                cast = o.str("cast"),
+                addedAt = o.addedTimestamp()
+            )
+        }
+    }
+
+
+    suspend fun getSeriesEpisodes(creds: Credentials, seriesId: String): List<SeriesEpisode> = withContext(Dispatchers.IO) {
+        val root = getJson(creds, "get_series_info&series_id=$seriesId") as? JsonObject ?: return@withContext emptyList()
+        val episodesObj = root.getAsJsonObject("episodes") ?: return@withContext emptyList()
+        val base = creds.server.trimEnd('/')
+
+        episodesObj.entrySet().flatMap { seasonEntry ->
+            val seasonNumber = seasonEntry.key.toIntOrNull() ?: 0
+            val arr = seasonEntry.value as? JsonArray ?: return@flatMap emptyList()
+
+            arr.mapNotNull { element ->
+                val episode = element.asJsonObject
+                val id = episode.str("id") ?: episode.str("episode_id") ?: return@mapNotNull null
+                val info = episode.getAsJsonObject("info")
+
+                val extension = episode.str("container_extension")
+                    ?: episode.str("containerExtension")
+                    ?: "mp4"
+
+                val episodeNumber = episode.str("episode_num")?.toIntOrNull()
+                    ?: episode.str("episode")?.toIntOrNull()
+                    ?: episode.str("episode_number")?.toIntOrNull()
+                    ?: 0
+
+                SeriesEpisode(
+                    id = id,
+                    seriesId = seriesId,
+                    seasonNumber = seasonNumber,
+                    episodeNumber = episodeNumber,
+                    title = episode.str("title")
+                        ?: episode.str("name")
+                        ?: "Episode $episodeNumber",
+                    plot = info?.str("plot")
+                        ?: info?.str("description")
+                        ?: episode.str("plot")
+                        ?: episode.str("description"),
+                    poster = info?.str("movie_image")
+                        ?: info?.str("cover_big")
+                        ?: info?.str("cover")
+                        ?: episode.str("movie_image"),
+                    duration = info?.str("duration") ?: episode.str("duration"),
+                    rating = info?.str("rating") ?: episode.str("rating"),
+                    releaseDate = info?.str("releasedate")
+                        ?: info?.str("release_date")
+                        ?: episode.str("releasedate")
+                        ?: episode.str("release_date"),
+                    streamUrl = "$base/series/${creds.username}/${creds.password}/$id.$extension"
+                )
+            }
+        }.sortedWith(compareBy<SeriesEpisode> { it.seasonNumber }.thenBy { it.episodeNumber })
+    }
+
+    private suspend fun categories(creds: Credentials, action: String): List<Category> = withContext(Dispatchers.IO) {
+        val arr = getJson(creds, action) as? JsonArray ?: return@withContext emptyList()
+        arr.mapNotNull { e ->
+            val o = e.asJsonObject
+            val id = o.str("category_id") ?: return@mapNotNull null
+            val name = o.str("category_name")?.trim().orEmpty()
+            if (name.isBlank() || name.equals("All", true) || name.contains("recent", true)) null
+            else Category(id, name)
+        }
+    }
+
+    private fun getJson(creds: Credentials, action: String?): JsonElement? {
+        val base = creds.server.trimEnd('/')
+        val u = URLEncoder.encode(creds.username, "UTF-8")
+        val p = URLEncoder.encode(creds.password, "UTF-8")
+        val a = action?.let { "&action=$it" } ?: ""
+        val url = "$base/player_api.php?username=$u&password=$p$a"
+        val req = Request.Builder().url(url).build()
+
+        http.newCall(req).execute().use { res ->
+            if (!res.isSuccessful) error("HTTP ${res.code}")
+            val body = res.body?.string().orEmpty().trim()
+            if (body.isBlank()) return null
+
+            val parsed = JsonParser.parseString(body)
+
+            // Some Xtream panels return JSON arrays/objects as quoted strings.
+            // Example: "[{...}]" instead of [{...}]
+            if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
+                val s = parsed.asString.trim()
+                if (s.startsWith("{") || s.startsWith("[")) {
+                    return JsonParser.parseString(s)
+                }
+            }
+
+            return parsed
+        }
+    }
+
+
+    private fun JsonObject.addedTimestamp(): Long? {
+        val raw = str("added")
+            ?: str("added_on")
+            ?: str("created_at")
+            ?: str("date_added")
+            ?: str("last_modified")
+            ?: str("modified")
+            ?: str("releaseDate")
+            ?: str("release_date")
+            ?: str("releasedate")
+            ?: str("year")
+            ?: return null
+
+        val cleaned = raw.trim()
+        if (cleaned.isBlank()) return null
+
+        cleaned.toLongOrNull()?.let { value ->
+            // Xtream usually returns Unix seconds. If milliseconds are provided, keep them.
+            return if (value > 9_999_999_999L) value else value * 1000L
+        }
+
+        val year = Regex("""\b(19|20)\d{2}\b""").find(cleaned)?.value?.toLongOrNull()
+        return year?.let { it * 10_000_000_000L }
+    }
+
+    private fun JsonObject.str(key: String): String? {
+        if (!has(key) || get(key).isJsonNull) return null
+        val value = get(key)
+        return when {
+            value.isJsonPrimitive -> value.asString
+            else -> null
+        }
+    }
+
+    private fun JsonObject.firstStringFromArrayOrPrimitive(key: String): String? {
+        if (!has(key) || get(key).isJsonNull) return null
+        val value = get(key)
+        return when {
+            value.isJsonArray -> value.asJsonArray.firstOrNull()?.takeIf { it.isJsonPrimitive }?.asString
+            value.isJsonPrimitive -> value.asString.takeIf { it.isNotBlank() }
+            else -> null
+        }
+    }
+}

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider path declarations for Qtone self-update.
+
+    The single entry below maps the app-internal cache subdirectory "updates"
+    to an external content:// URI. UpdateInstaller.kt downloads the APK to
+    ${context.cacheDir}/updates/qtone-update.apk and then calls
+    FileProvider.getUriForFile(...) which produces a URI like:
+        content://com.qtone.app.fileprovider/updates/qtone-update.apk
+    That URI is what the system package installer accepts via the
+    ACTION_INSTALL_PACKAGE intent.
+
+    The cacheDir was chosen deliberately:
+      - It's app-internal, so no storage permission needed.
+      - It's cleared by Android when the device is low on storage, so a stale
+        old APK can't take up space indefinitely.
+      - The user can also clear it via Settings → Apps → Qtone → Storage.
+
+    Each release downloads to the same filename ("qtone-update.apk"), so the
+    previous APK is overwritten — disk usage stays bounded.
+-->
+<paths>
+    <cache-path
+        name="updates"
+        path="updates/" />
+</paths>

@@ -1,0 +1,86 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        REQUEST_INSTALL_PACKAGES lets the app launch the system package
+        installer to install a downloaded APK update. The first time the user
+        accepts an update, Android also shows a one-time "Install unknown
+        apps" toggle for Qtone (on Android 8.0+). Once granted, subsequent
+        updates install with just the normal install confirmation dialog.
+        This is the standard self-update pattern used by sideloaded TV apps
+        that aren't distributed via the Play Store.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
+        TV-friendly feature declarations.
+
+        - leanback: signals that this app supports Android TV's leanback UI mode.
+          required=false so non-TV devices (phones, tablets, Fire TVs that don't
+          report leanback) can still install the app.
+        - touchscreen required=false: critical. The Play Store and many TV
+          launchers refuse to install apps that implicitly require a touchscreen.
+          By default touchscreen is implicitly required; this opt-out makes the
+          app installable on Onn boxes, Chromecast with Google TV, Nvidia Shield,
+          Xiaomi Mi Box, and other Android TV / Google TV hardware.
+        - faketouch / gamepad: marked optional too. No app behavior depends on
+          them but declaring them suppresses the system's "may not work" prompts.
+    -->
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.faketouch"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.gamepad"
+        android:required="false" />
+
+    <application
+        android:name=".QtoneApp"
+        android:allowBackup="true"
+        android:banner="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Qtone"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <activity
+            android:name=".player.PlayerActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            FileProvider lets us hand a downloaded APK file to the system
+            package installer via a content:// URI. Direct file:// URIs are
+            blocked by Android 7+ (FileUriExposedException). The authority
+            string here must exactly match what UpdateInstaller.kt passes to
+            FileProvider.getUriForFile(). file_paths.xml declares which
+            directories the FileProvider is allowed to share.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>
