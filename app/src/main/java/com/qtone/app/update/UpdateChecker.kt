@@ -59,30 +59,33 @@ object UpdateChecker {
      * Holds the result of an update check.
      */
     sealed class Result {
-        /** No newer version available, or check failed quietly. */
+        /** No newer version available. */
         object UpToDate : Result()
         /** A newer version is available. */
         data class UpdateAvailable(
             val manifest: UpdateManifest,
             val isMandatory: Boolean
         ) : Result()
+        /** Check failed — carries a human-readable reason for debugging. */
+        data class Error(val reason: String) : Result()
     }
 
     /**
      * Fetch the remote manifest and compare to installed versionCode.
-     *
-     * Returns UpToDate when:
-     *   - The network request fails for any reason
-     *   - The JSON is malformed or has invalid fields
-     *   - The remote versionCode is ≤ the installed versionCode
-     *
-     * Returns UpdateAvailable when:
-     *   - A valid manifest reports a higher versionCode than the installed one
      */
     suspend fun check(): Result = withContext(Dispatchers.IO) {
-        val manifest = fetchManifest() ?: return@withContext Result.UpToDate
+        val fetchResult = fetchManifest()
+        if (fetchResult.second != null) {
+            return@withContext Result.Error(fetchResult.second!!)
+        }
+        val manifest = fetchResult.first
+            ?: return@withContext Result.Error("Manifest was null (unknown error)")
 
-        if (!manifest.isValid()) return@withContext Result.UpToDate
+        if (!manifest.isValid()) {
+            return@withContext Result.Error(
+                "Invalid manifest: code=${manifest.versionCode} url='${manifest.apkUrl}' name='${manifest.versionName}'"
+            )
+        }
 
         val installedVersionCode = BuildConfig.VERSION_CODE
 
@@ -98,21 +101,26 @@ object UpdateChecker {
         Result.UpdateAvailable(manifest = manifest, isMandatory = mandatory)
     }
 
-    private fun fetchManifest(): UpdateManifest? {
+    /** Returns (manifest, errorMessage). One of the two will be null. */
+    private fun fetchManifest(): Pair<UpdateManifest?, String?> {
         return try {
             val request = Request.Builder()
                 .url(MANIFEST_URL)
                 .header("Cache-Control", "no-cache")
                 .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                gson.fromJson(body, UpdateManifest::class.java)
+                if (!response.isSuccessful) {
+                    return Pair(null, "HTTP ${response.code}: ${response.message}")
+                }
+                val body = response.body?.string()
+                if (body == null) {
+                    return Pair(null, "Empty response body")
+                }
+                val manifest = gson.fromJson(body, UpdateManifest::class.java)
+                Pair(manifest, null)
             }
-        } catch (_: Throwable) {
-            // All errors → silent. Update checking is best-effort and must
-            // never break the user's normal app startup.
-            null
+        } catch (e: Throwable) {
+            Pair(null, "${e.javaClass.simpleName}: ${e.message}")
         }
     }
 }

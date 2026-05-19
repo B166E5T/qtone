@@ -1,6 +1,6 @@
 {
-  "versionCode": 999,
-  "versionName": "9.9.9",
+  "versionCode": 100,
+  "versionName": "1.0.0",
   "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.0/qtone-v1.0.0.apk",
-  "changelog": "Test update prompt"
+  "changelog": "Initial release"
 }

@@ -427,14 +427,23 @@ class MainActivity : ComponentActivity() {
                         onLogout = { vm.logout() },
                         onChangeUrl = { url -> vm.changeServerUrl(url) },
                         onCheckForUpdates = {
-                            // Re-run the same check. Mutating updateCheck here
-                            // unrolls back through the same dialog logic — if
-                            // a newer manifest is available, the dialog opens.
-                            // Resetting updateDismissed lets it show even if
-                            // the user dismissed an earlier prompt this session.
                             lifecycleScope.launch {
                                 updateDismissed = false
                                 updateCheck = UpdateChecker.check()
+                                // Show a toast with the result so we can see
+                                // what's happening (especially on errors).
+                                val msg = when (val r = updateCheck) {
+                                    is UpdateChecker.Result.UpToDate ->
+                                        "You're running the latest version (${com.qtone.app.BuildConfig.VERSION_CODE})"
+                                    is UpdateChecker.Result.UpdateAvailable ->
+                                        "Update available: ${r.manifest.versionName}"
+                                    is UpdateChecker.Result.Error ->
+                                        "Update check failed: ${r.reason}"
+                                    else -> "Unknown result"
+                                }
+                                android.widget.Toast.makeText(
+                                    this@MainActivity, msg, android.widget.Toast.LENGTH_LONG
+                                ).show()
                             }
                         },
                         // Quick-info popup state plumbing. The popup itself

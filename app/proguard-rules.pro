@@ -28,6 +28,7 @@
 # name and we don't want R8 renaming the fields.
 -keep class com.qtone.app.model.** { *; }
 -keep class com.qtone.app.network.** { *; }
+-keep class com.qtone.app.update.** { *; }
 
 # ----- OkHttp -----
 -dontwarn okhttp3.**
