@@ -3,12 +3,14 @@ package com.qtone.app.network
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.google.gson.stream.JsonReader
 import com.qtone.app.model.MediaItem
 import com.qtone.app.model.SeriesEpisode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.StringReader
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
@@ -356,7 +358,9 @@ class TmdbClient {
             if (!res.isSuccessful) return null
             val body = res.body?.string().orEmpty()
             if (body.isBlank()) return null
-            return JsonParser.parseString(body).asJsonObject
+            val reader = JsonReader(StringReader(body))
+            reader.isLenient = true
+            return JsonParser.parseReader(reader).asJsonObject
         }
     }
 

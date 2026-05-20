@@ -4,6 +4,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.google.gson.stream.JsonReader
 import com.qtone.app.model.Category
 import com.qtone.app.model.Credentials
 import com.qtone.app.model.MediaItem
@@ -12,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.StringReader
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -208,14 +210,14 @@ class XtreamClient {
             val body = res.body?.string().orEmpty().trim()
             if (body.isBlank()) return null
 
-            val parsed = JsonParser.parseString(body)
+            val parsed = parseLenient(body)
 
             // Some Xtream panels return JSON arrays/objects as quoted strings.
             // Example: "[{...}]" instead of [{...}]
             if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
                 val s = parsed.asString.trim()
                 if (s.startsWith("{") || s.startsWith("[")) {
-                    return JsonParser.parseString(s)
+                    return parseLenient(s)
                 }
             }
 
@@ -223,6 +225,14 @@ class XtreamClient {
         }
     }
 
+
+    /** Parse JSON leniently — tolerates BOMs, stray characters, and other
+     *  quirks that some Xtream provider panels inject into their responses. */
+    private fun parseLenient(json: String): JsonElement {
+        val reader = JsonReader(StringReader(json))
+        reader.isLenient = true
+        return JsonParser.parseReader(reader)
+    }
 
     private fun JsonObject.addedTimestamp(): Long? {
         val raw = str("added")
