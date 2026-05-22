@@ -375,8 +375,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 store.saveCredentials(creds)
                 _state.value = _state.value.copy(accountExpirationMs = expirationMs)
                 refreshContent(creds, manual = true)
+            } catch (e: java.net.UnknownHostException) {
+                _state.value = _state.value.copy(loggedIn = false, updating = false, error = "Cannot reach server. Check the URL and your internet connection.")
+            } catch (e: java.net.SocketTimeoutException) {
+                _state.value = _state.value.copy(loggedIn = false, updating = false, error = "Server took too long to respond. Try again.")
+            } catch (e: javax.net.ssl.SSLException) {
+                _state.value = _state.value.copy(loggedIn = false, updating = false, error = "SSL error. Try using http:// instead of https://")
             } catch (e: Exception) {
-                _state.value = _state.value.copy(loggedIn = false, updating = false, error = e.message ?: "Login failed.")
+                val msg = e.message ?: "Login failed."
+                val userMsg = when {
+                    "HTTP" in msg -> "Server error ($msg). Check the URL."
+                    else -> msg
+                }
+                _state.value = _state.value.copy(loggedIn = false, updating = false, error = userMsg)
             }
         }
     }
@@ -437,36 +448,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        viewModelScope.launch {
-            try {
-                _state.value = _state.value.copy(
-                    error = null,
-                    loading = false,
-                    loggedIn = true,
-                    updating = true,
-                    credentials = creds
-                )
-
-                val ok = withTimeoutOrNull(20_000L) {
-                    withContext(Dispatchers.IO) { client.login(creds) }
-                } ?: false
-
-                if (!ok) {
-                    _state.value = _state.value.copy(updating = false, error = "Could not verify Xtream credentials before update.")
-                    return@launch
-                }
-
-                val expirationMs = withTimeoutOrNull(12_000L) {
-                    withContext(Dispatchers.IO) { client.getAccountExpirationMs(creds) }
-                }
-                store.saveAccountExpirationMs(expirationMs)
-                store.saveCredentials(creds)
-                _state.value = _state.value.copy(accountExpirationMs = expirationMs)
-                refreshContent(creds, manual = true)
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(updating = false, loading = false, error = e.message ?: "Update failed.")
-            }
-        }
+        // No re-verification needed — if the user is inside the app they
+        // already authenticated successfully. Just refresh the content.
+        refreshContent(creds, manual = true)
     }
 
     private fun refreshContent(creds: Credentials, manual: Boolean) {
@@ -593,10 +577,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 // Stop cleanly instead of hanging. Cached content can still load on next app open.
+                val raw = e.message ?: "Could not update content"
+                val userMsg = when {
+                    "unexpected end of stream" in raw.lowercase() ->
+                        "Server connection dropped. Please try again."
+                    "timed out" in raw.lowercase() ->
+                        "Server took too long to respond. Please try again."
+                    "unable to resolve host" in raw.lowercase() || "unknownhost" in raw.lowercase() ->
+                        "Cannot reach server. Check your internet connection."
+                    else -> raw
+                }
                 _state.value = _state.value.copy(
                     updating = false,
                     loading = false,
-                    error = e.message ?: "Could not update content"
+                    error = userMsg
                 )
             }
         }

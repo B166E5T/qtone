@@ -26,7 +26,15 @@ class XtreamClient {
     suspend fun login(creds: Credentials): Boolean = withContext(Dispatchers.IO) {
         val obj = getJson(creds, null) as? JsonObject ?: return@withContext false
         val userInfo = obj.getAsJsonObject("user_info") ?: return@withContext false
-        userInfo.get("auth")?.asInt == 1
+        val auth = userInfo.get("auth") ?: return@withContext false
+        // Providers return auth in various formats: 1, "1", true, "true"
+        when {
+            auth.isJsonPrimitive && auth.asJsonPrimitive.isNumber -> auth.asInt == 1
+            auth.isJsonPrimitive && auth.asJsonPrimitive.isBoolean -> auth.asBoolean
+            auth.isJsonPrimitive && auth.asJsonPrimitive.isString ->
+                auth.asString == "1" || auth.asString.equals("true", ignoreCase = true)
+            else -> false
+        }
     }
 
     suspend fun getAccountExpirationMs(creds: Credentials): Long? = withContext(Dispatchers.IO) {
@@ -205,24 +213,38 @@ class XtreamClient {
         val url = "$base/player_api.php?username=$u&password=$p$a"
         val req = Request.Builder().url(url).build()
 
-        http.newCall(req).execute().use { res ->
-            if (!res.isSuccessful) error("HTTP ${res.code}")
-            val body = res.body?.string().orEmpty().trim()
-            if (body.isBlank()) return null
+        // Retry once on transient connection errors (e.g. "unexpected end
+        // of stream") which are common with overloaded Xtream panels.
+        var lastException: Exception? = null
+        for (attempt in 1..2) {
+            try {
+                http.newCall(req).execute().use { res ->
+                    if (!res.isSuccessful) error("HTTP ${res.code}")
+                    val body = res.body?.string().orEmpty().trim()
+                    if (body.isBlank()) return null
 
-            val parsed = parseLenient(body)
+                    val parsed = parseLenient(body)
 
-            // Some Xtream panels return JSON arrays/objects as quoted strings.
-            // Example: "[{...}]" instead of [{...}]
-            if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
-                val s = parsed.asString.trim()
-                if (s.startsWith("{") || s.startsWith("[")) {
-                    return parseLenient(s)
+                    // Some Xtream panels return JSON arrays/objects as quoted strings.
+                    // Example: "[{...}]" instead of [{...}]
+                    if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
+                        val s = parsed.asString.trim()
+                        if (s.startsWith("{") || s.startsWith("[")) {
+                            return parseLenient(s)
+                        }
+                    }
+
+                    return parsed
+                }
+            } catch (e: Exception) {
+                lastException = e
+                if (attempt < 2) {
+                    // Brief pause before retry
+                    Thread.sleep(1500)
                 }
             }
-
-            return parsed
         }
+        throw lastException ?: RuntimeException("Request failed")
     }
 
 

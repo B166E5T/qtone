@@ -19,8 +19,8 @@ android {
         //   versionName: human-readable label shown in About / Settings and in
         //     the update prompt's "Version X is available" text.
         // BUMP versionCode by 1 EVERY release. Never reuse a value.
-        versionCode = 101
-        versionName = "1.0.1"
+        versionCode = 102
+        versionName = "1.0.2"
     }
 
     compileOptions {
