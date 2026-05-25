@@ -717,25 +717,28 @@ fun MovieMediaGrid(
 // ── Poster dominant color extraction for focus glow ────────────────────
 // Extracts the dominant color from a poster image using Android's Palette API.
 // Results are cached in a static map so each poster URL is processed only once.
-// The extraction runs asynchronously on first composition and returns a default
-// color until the real one is ready.
+// Extraction only runs when a card is focused (one at a time), preventing
+// the IO burst that caused scroll jitter on initial load.
 
 private val dominantColorCache = java.util.concurrent.ConcurrentHashMap<String, Color>()
 private val DEFAULT_GLOW_COLOR = Color(0xFF6C5CE7) // subtle purple fallback
 
 @Composable
-private fun rememberDominantColor(posterUrl: String?): Color {
+private fun rememberDominantColor(posterUrl: String?, isFocused: Boolean): Color {
     if (posterUrl.isNullOrBlank()) return DEFAULT_GLOW_COLOR
 
     // Return cached color immediately if available
     val cached = dominantColorCache[posterUrl]
     if (cached != null) return cached
 
+    // Only extract when focused — prevents 12+ simultaneous extractions
+    // during initial scroll. The glow only shows on the focused card anyway.
+    if (!isFocused) return DEFAULT_GLOW_COLOR
+
     var color by remember(posterUrl) { mutableStateOf(DEFAULT_GLOW_COLOR) }
     val context = LocalContext.current
 
     LaunchedEffect(posterUrl) {
-        // Already extracted by another composition while we were waiting
         dominantColorCache[posterUrl]?.let { color = it; return@LaunchedEffect }
 
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -743,8 +746,8 @@ private fun rememberDominantColor(posterUrl: String?): Color {
                 val loader = ImageLoader(context)
                 val request = ImageRequest.Builder(context)
                     .data(posterUrl)
-                    .allowHardware(false) // Palette needs a software bitmap
-                    .size(80, 120)        // Small size — we only need the color
+                    .allowHardware(false)
+                    .size(80, 120)
                     .build()
                 val result = loader.execute(request)
                 if (result is SuccessResult) {
@@ -807,7 +810,7 @@ fun MoviePosterTile(
     // that does not trigger relayout. So even though the animation value lives
     // in Compose state, the visible motion is hardware-accelerated.
     var focused by remember { mutableStateOf(false) }
-    val glowColor = rememberDominantColor(item.poster)
+    val glowColor = rememberDominantColor(item.poster, focused)
     val animatedScale by animateFloatAsState(
         targetValue = if (focused) focusedScale else 1.0f,
         // High stiffness = fast, snappy scale that settles in ~100ms.

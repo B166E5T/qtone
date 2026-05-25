@@ -288,13 +288,27 @@ class XtreamClient {
         }
     }
 
+    companion object {
+        // HTTPS relay that forwards API requests to the Xtream panel.
+        // Hides the actual server URL from ISP traffic inspection (Xfinity,
+        // Spectrum, AT&T) which block plain HTTP requests to IPTV panels.
+        // The ISP sees encrypted traffic to Render.com — indistinguishable
+        // from any regular HTTPS website visit.
+        private const val RELAY_URL = "https://qtone-relay.onrender.com/"
+    }
+
     private fun getJson(creds: Credentials, action: String?): JsonElement? {
         val base = creds.server.trimEnd('/')
         val u = URLEncoder.encode(creds.username, "UTF-8")
         val p = URLEncoder.encode(creds.password, "UTF-8")
         val a = action?.let { "&action=$it" } ?: ""
-        val url = "$base/player_api.php?username=$u&password=$p$a"
-        val req = Request.Builder().url(url).build()
+        val targetUrl = "$base/player_api.php?username=$u&password=$p$a"
+
+        // Route through the HTTPS relay to bypass ISP blocking.
+        val req = Request.Builder()
+            .url(RELAY_URL)
+            .header("X-Target-URL", targetUrl)
+            .build()
 
         // Retry once on transient connection errors (e.g. "unexpected end
         // of stream") which are common with overloaded Xtream panels.

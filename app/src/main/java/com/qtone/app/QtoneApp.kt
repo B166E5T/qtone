@@ -55,6 +55,8 @@ class QtoneApp : Application(), ImageLoaderFactory {
             // Allow Coil to use hardware bitmaps where supported. Cheaper
             // GPU upload, less main-thread CPU work during scrolling.
             .allowHardware(true)
+            .crossfade(false) // No fade-in animation — instant poster display.
+                              // Saves one compositing pass per image during scroll.
             .respectCacheHeaders(false) // We control caching, not the server.
             .build()
     }
