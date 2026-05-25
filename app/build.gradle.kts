@@ -19,8 +19,8 @@ android {
         //   versionName: human-readable label shown in About / Settings and in
         //     the update prompt's "Version X is available" text.
         // BUMP versionCode by 1 EVERY release. Never reuse a value.
-        versionCode = 104
-        versionName = "1.0.4"
+        versionCode = 105
+        versionName = "1.0.5"
     }
 
     compileOptions {
@@ -108,8 +108,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
-    implementation("com.google.code.gson:gson:2.11.0")
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
+    implementation("androidx.palette:palette-ktx:1.0.0")
+    implementation("com.google.code.gson:gson:2.11.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -235,11 +235,18 @@ class PlayerActivity : ComponentActivity() {
                             .remove("${progressPrefix}_position_$itemId")
                             .remove("${progressPrefix}_duration_$itemId")
 
-                        if (progressPrefix == "series_episode" && seriesId.isNotBlank()) {
-                            val mappedEpisode = getSharedPreferences("qtone_session", Context.MODE_PRIVATE)
-                                .getString("series_continue_episode_$seriesId", "")
-                            if (mappedEpisode == itemId) {
-                                editor.remove("series_continue_episode_$seriesId")
+                        if (progressPrefix == "series_episode") {
+                            // Mark as watched when ≥ 90% played
+                            if (nearEnd) {
+                                val store = com.qtone.app.storage.SessionStore(this)
+                                store.markEpisodeWatched(itemId)
+                            }
+                            if (seriesId.isNotBlank()) {
+                                val mappedEpisode = getSharedPreferences("qtone_session", Context.MODE_PRIVATE)
+                                    .getString("series_continue_episode_$seriesId", "")
+                                if (mappedEpisode == itemId) {
+                                    editor.remove("series_continue_episode_$seriesId")
+                                }
                             }
                         }
                     } else {

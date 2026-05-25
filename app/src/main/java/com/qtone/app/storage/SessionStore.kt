@@ -296,6 +296,39 @@ class SessionStore(private val context: Context) {
         return isSeriesEpisodeContinueWatching(episodeId)
     }
 
+    // ── Watched episodes ───────────────────────────────────────────────
+    // An episode is "watched" when the user reached ≥ 90% of its duration.
+    // Stored as a StringSet in SharedPreferences — cheap and fast lookups.
+
+    fun markEpisodeWatched(episodeId: String) {
+        val current = prefs.getStringSet("watched_episodes", emptySet()) ?: emptySet()
+        prefs.edit().putStringSet("watched_episodes", current + episodeId).apply()
+    }
+
+    fun isEpisodeWatched(episodeId: String): Boolean {
+        return prefs.getStringSet("watched_episodes", emptySet())?.contains(episodeId) == true
+    }
+
+    fun getWatchedEpisodeIds(): Set<String> {
+        return prefs.getStringSet("watched_episodes", emptySet()) ?: emptySet()
+    }
+
+    /**
+     * Check position vs duration and mark as watched if ≥ 90%.
+     * Called from the player when playback position updates.
+     * Returns true if the episode was newly marked as watched.
+     */
+    fun checkAndMarkWatched(episodeId: String): Boolean {
+        if (isEpisodeWatched(episodeId)) return false
+        val position = getSeriesEpisodePlaybackPosition(episodeId)
+        val duration = getSeriesEpisodePlaybackDuration(episodeId)
+        if (duration > 0L && position >= duration * 0.90) {
+            markEpisodeWatched(episodeId)
+            return true
+        }
+        return false
+    }
+
     fun clearSeriesEpisodeContinueWatching(episodeId: String) {
         val editor = prefs.edit()
             .remove("series_episode_position_$episodeId")

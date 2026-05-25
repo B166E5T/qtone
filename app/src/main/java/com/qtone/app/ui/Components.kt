@@ -61,6 +61,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -69,6 +70,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.ImageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import androidx.core.graphics.drawable.toBitmap
+import androidx.palette.graphics.Palette
 import com.qtone.app.model.Category
 import com.qtone.app.model.MediaItem
 import com.qtone.app.model.SeriesEpisode
@@ -706,6 +714,60 @@ fun MovieMediaGrid(
     }
 }
 
+// ── Poster dominant color extraction for focus glow ────────────────────
+// Extracts the dominant color from a poster image using Android's Palette API.
+// Results are cached in a static map so each poster URL is processed only once.
+// The extraction runs asynchronously on first composition and returns a default
+// color until the real one is ready.
+
+private val dominantColorCache = java.util.concurrent.ConcurrentHashMap<String, Color>()
+private val DEFAULT_GLOW_COLOR = Color(0xFF6C5CE7) // subtle purple fallback
+
+@Composable
+private fun rememberDominantColor(posterUrl: String?): Color {
+    if (posterUrl.isNullOrBlank()) return DEFAULT_GLOW_COLOR
+
+    // Return cached color immediately if available
+    val cached = dominantColorCache[posterUrl]
+    if (cached != null) return cached
+
+    var color by remember(posterUrl) { mutableStateOf(DEFAULT_GLOW_COLOR) }
+    val context = LocalContext.current
+
+    LaunchedEffect(posterUrl) {
+        // Already extracted by another composition while we were waiting
+        dominantColorCache[posterUrl]?.let { color = it; return@LaunchedEffect }
+
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val loader = ImageLoader(context)
+                val request = ImageRequest.Builder(context)
+                    .data(posterUrl)
+                    .allowHardware(false) // Palette needs a software bitmap
+                    .size(80, 120)        // Small size — we only need the color
+                    .build()
+                val result = loader.execute(request)
+                if (result is SuccessResult) {
+                    val bitmap = result.drawable.toBitmap()
+                    val palette = Palette.from(bitmap).generate()
+                    val dominant = palette.getVibrantColor(
+                        palette.getMutedColor(
+                            palette.getDominantColor(0xFF6C5CE7.toInt())
+                        )
+                    )
+                    val extracted = Color(dominant)
+                    dominantColorCache[posterUrl] = extracted
+                    color = extracted
+                }
+            } catch (_: Exception) {
+                // Extraction failed — keep default color
+            }
+        }
+    }
+
+    return color
+}
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun MoviePosterTile(
@@ -745,6 +807,7 @@ fun MoviePosterTile(
     // that does not trigger relayout. So even though the animation value lives
     // in Compose state, the visible motion is hardware-accelerated.
     var focused by remember { mutableStateOf(false) }
+    val glowColor = rememberDominantColor(item.poster)
     val animatedScale by animateFloatAsState(
         targetValue = if (focused) focusedScale else 1.0f,
         // High stiffness = fast, snappy scale that settles in ~100ms.
@@ -789,13 +852,12 @@ fun MoviePosterTile(
         scale = ClickableSurfaceDefaults.scale(
             focusedScale = 1.0f
         ),
-        // No glow. Nextv-style focus uses just scale + a thin bright outline.
-        // Glow is the most expensive part of focus rendering (per-frame shadow
-        // blur) and removing it makes the focus animation noticeably cheaper
-        // on Fire TV. Empty glow is equivalent to "off".
+        // Poster-colored glow on focus — extracted from the dominant color
+        // of the poster image. Only renders when focused (one card at a time),
+        // so the performance cost is a single shadow draw per frame.
         glow = ClickableSurfaceDefaults.glow(
             glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
-            focusedGlow = Glow(elevationColor = Color.Transparent, elevation = 0.dp)
+            focusedGlow = Glow(elevationColor = glowColor, elevation = 16.dp)
         ),
         // Focus indication = thin white outline. No border at rest (the poster
         // image edge defines the card on a black background). On focus a
@@ -1155,6 +1217,7 @@ fun MovieDetailScreen(
     seriesEpisodes: List<SeriesEpisode> = emptyList(),
     isLoadingEpisodes: Boolean = false,
     isPlotLoading: Boolean = false,
+    watchedEpisodeIds: Set<String> = emptySet(),
     initialSimilarFocusId: String? = null,
     forceFirstSimilarFocusForItemId: String? = null,
     onToggleSimilarFavorite: (MediaItem) -> Unit = {},
@@ -1363,6 +1426,7 @@ fun MovieDetailScreen(
                 episodes = seriesEpisodes,
                 isLoading = isLoadingEpisodes,
                 onEpisodeOpen = onEpisodeOpen,
+                watchedEpisodeIds = watchedEpisodeIds,
                 modifier = Modifier
                     .offset(x = 42.dp, y = 250.dp)
                     .fillMaxWidth()
@@ -1380,6 +1444,7 @@ private fun SeriesSeasonsEpisodesSection(
     episodes: List<SeriesEpisode>,
     isLoading: Boolean = false,
     onEpisodeOpen: (SeriesEpisode) -> Unit,
+    watchedEpisodeIds: Set<String> = emptySet(),
     modifier: Modifier = Modifier
 ) {
     val seasons = remember(episodes) {
@@ -1433,6 +1498,7 @@ private fun SeriesSeasonsEpisodesSection(
                 items(visibleEpisodes, key = { it.id }) { episode ->
                     EpisodeRow(
                         episode = episode,
+                        isWatched = watchedEpisodeIds.contains(episode.id),
                         onClick = { onEpisodeOpen(episode) }
                     )
                 }
@@ -1474,6 +1540,7 @@ private fun SeasonButton(
 @Composable
 private fun EpisodeRow(
     episode: SeriesEpisode,
+    isWatched: Boolean = false,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -1503,27 +1570,36 @@ private fun EpisodeRow(
         color = episodeRowSurfaceColor,
         border = BorderStroke(episodeRowBorderWidth, episodeRowBorderColor)
     ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 9.dp)) {
-            Text(
-                "Episode ${episode.episodeNumber.takeIf { it > 0 } ?: ""}  ${episode.title}",
-                color = QtoneColors.Text,
-                fontSize = 15.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 9.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Episode ${episode.episodeNumber.takeIf { it > 0 } ?: ""}  ${episode.title}",
+                        color = if (isWatched) Color(0xFF666680) else QtoneColors.Text,
+                        fontSize = 15.sp,
+                        lineHeight = 17.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (isWatched) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("✓", color = Color(0xFF4CAF50), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
 
-            Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(4.dp))
 
-            Text(
-                episode.plot ?: "No episode information available.",
-                color = Color(0xFFD0CED8),
-                fontSize = 12.sp,
-                lineHeight = 15.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+                Text(
+                    episode.plot ?: "No episode information available.",
+                    color = if (isWatched) Color(0xFF555568) else Color(0xFFD0CED8),
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

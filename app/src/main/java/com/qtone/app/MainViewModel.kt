@@ -44,7 +44,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(UiState(loading = true))
     val state: StateFlow<UiState> = _state
 
+    // ── Watched episodes ──────────────────────────────────────────────
+    private val _watchedEpisodeIds = MutableStateFlow<Set<String>>(emptySet())
+    val watchedEpisodeIds: StateFlow<Set<String>> = _watchedEpisodeIds.asStateFlow()
+
+    /** Reload watched episode IDs from disk. Call after returning from player. */
+    fun refreshWatchedEpisodes() {
+        _watchedEpisodeIds.value = store.getWatchedEpisodeIds()
+    }
+
     init {
+        refreshWatchedEpisodes()
         viewModelScope.launch {
             // Give Compose one frame to show the startup loading screen before cache/provider work begins.
             delay(350)

@@ -269,6 +269,7 @@ class MainActivity : ComponentActivity() {
                 // rendering inside MovieDetailScreen; gating it on the list
                 // breaks movies during the in-flight window.
                 val similarMoviesFromVm by vm.similarMoviesByItemId.collectAsState()
+                val watchedEpisodes by vm.watchedEpisodeIds.collectAsState()
                 val stableSimilarMovies = if (selected.streamType == "movie") {
                     similarMoviesFromVm[selected.id].orEmpty()
                 } else {
@@ -311,6 +312,7 @@ class MainActivity : ComponentActivity() {
                     seriesEpisodes = if (selected.streamType == "series") state.seriesEpisodes[selected.id].orEmpty() else emptyList(),
                     isLoadingEpisodes = selected.streamType == "series" && state.seriesEpisodesLoading.contains(selected.id),
                     isPlotLoading = state.plotFetchingFor.contains(selected.id),
+                    watchedEpisodeIds = watchedEpisodes,
                     initialSimilarFocusId = initialSimilarFocusId,
                     forceFirstSimilarFocusForItemId = forceFirstSimilarFocusForItemId,
                     onToggleSimilarFavorite = { movie -> vm.toggleMovieFavorite(movie) },
@@ -587,6 +589,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         launchingPlayerActivity = false
         vm.refreshMovieContinueWatching()
+        vm.refreshWatchedEpisodes()
     }
 
     override fun onStop() {
