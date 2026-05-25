@@ -457,6 +457,7 @@ fun MovieMediaGrid(
     focusedItemId: String? = null,
     restoreFocusRequest: Int = 0,
     savedScroll: androidx.compose.runtime.MutableState<Pair<Int, Int>?>? = null,
+    selectedCategoryId: String = "",
     // Column count is fixed at 5 for the sidebar-always-visible layout.
     // Kept as a parameter so the internal column-lock modulo logic stays
     // generic (and so non-poster layouts that share the same grid can use
@@ -476,6 +477,13 @@ fun MovieMediaGrid(
     val gridState = rememberLazyGridState()
     val restoreFocusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
+
+    // Scroll to the first card when the category changes.
+    LaunchedEffect(selectedCategoryId) {
+        if (selectedCategoryId.isNotEmpty()) {
+            gridState.scrollToItem(0)
+        }
+    }
 
     // ── Column-lock state (same pattern as Live TV grid) ─────────────────
     // Prevents the user from being "jumped" to a different column when
@@ -860,7 +868,7 @@ fun MoviePosterTile(
         // so the performance cost is a single shadow draw per frame.
         glow = ClickableSurfaceDefaults.glow(
             glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
-            focusedGlow = Glow(elevationColor = glowColor, elevation = 16.dp)
+            focusedGlow = Glow(elevationColor = glowColor, elevation = 22.dp)
         ),
         // Focus indication = thin white outline. No border at rest (the poster
         // image edge defines the card on a black background). On focus a

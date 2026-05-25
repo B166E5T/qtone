@@ -1,6 +1,6 @@
 {
-  "versionCode": 106,
-  "versionName": "1.0.6",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.6/qtone-v1.0.6.apk",
-  "changelog": "New icon, poster glow, watched episodes, performance improvements, ISP bypass"
+  "versionCode": 107,
+  "versionName": "1.0.7",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.7/qtone-v1.0.7.apk",
+  "changelog": "scrolling first card fix and more glow"
 }

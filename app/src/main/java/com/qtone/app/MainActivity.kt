@@ -1251,6 +1251,7 @@ private fun PosterLayout(
                         focusedItemId = gridFocusedItemId,
                         restoreFocusRequest = restoreFocusRequest,
                         savedScroll = savedScroll,
+                        selectedCategoryId = selectedCategoryId,
                         columns = columns,
                         onFocused = onFocused,
                         onClick = onOpen,
@@ -1404,6 +1405,13 @@ private fun LiveLayout(
             player.setMediaItem(ExoMediaItem.fromUri(url))
             player.prepare()
             player.playWhenReady = true
+        }
+    }
+
+    // Scroll grid to top when category changes (non-detail mode only)
+    LaunchedEffect(state.activeLiveCategoryId) {
+        if (!detailMode) {
+            liveGridState.scrollToItem(0)
         }
     }
 
