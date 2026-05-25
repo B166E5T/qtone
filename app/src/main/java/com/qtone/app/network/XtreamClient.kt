@@ -11,6 +11,7 @@ import com.qtone.app.model.MediaItem
 import com.qtone.app.model.SeriesEpisode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.StringReader
@@ -18,23 +19,105 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class XtreamClient {
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build()
+    private val http: OkHttpClient = run {
+        // Use DNS-over-HTTPS (Cloudflare) to bypass ISP DNS filtering.
+        // ISPs like Xfinity and AT&T use DNS-level blocking that intercepts
+        // queries and returns a block page. DoH encrypts DNS queries so
+        // the ISP can't see or intercept them.
+        // Falls back to system DNS if Cloudflare is unreachable.
+        val bootstrap = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+        val doh = okhttp3.dnsoverhttps.DnsOverHttps.Builder()
+            .client(bootstrap)
+            .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
+            .build()
+        val fallbackDns = object : okhttp3.Dns {
+            override fun lookup(hostname: String): List<java.net.InetAddress> {
+                return try {
+                    doh.lookup(hostname)
+                } catch (_: Exception) {
+                    // Cloudflare unreachable — fall back to system DNS
+                    okhttp3.Dns.SYSTEM.lookup(hostname)
+                }
+            }
+        }
 
-    suspend fun login(creds: Credentials): Boolean = withContext(Dispatchers.IO) {
-        val obj = getJson(creds, null) as? JsonObject ?: return@withContext false
-        val userInfo = obj.getAsJsonObject("user_info") ?: return@withContext false
-        val auth = userInfo.get("auth") ?: return@withContext false
-        // Providers return auth in various formats: 1, "1", true, "true"
-        when {
+        OkHttpClient.Builder()
+            .dns(fallbackDns)
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder()
+                        .header("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36")
+                        .build()
+                )
+            }
+            .build()
+    }
+
+    /**
+     * Returns null on success, or a user-facing error string on failure.
+     */
+    suspend fun login(creds: Credentials): String? = withContext(Dispatchers.IO) {
+        val obj = try {
+            getJson(creds, null)
+        } catch (e: Exception) {
+            val msg = e.message?.lowercase() ?: ""
+            return@withContext when {
+                "unable to resolve" in msg || "unknownhost" in msg ->
+                    "Cannot reach server. Check the URL and your internet connection."
+                "timed out" in msg ->
+                    "Server took too long to respond. Try again."
+                "unexpected end of stream" in msg ->
+                    "Server connection dropped. Try again."
+                else -> "Connection error. Check the server URL."
+            }
+        }
+
+        if (obj == null || obj !is JsonObject) {
+            return@withContext "Could not connect to server. Check the URL."
+        }
+
+        val userInfo = obj.getAsJsonObject("user_info")
+        if (userInfo == null) {
+            return@withContext "Invalid credentials. Check your username and password."
+        }
+
+        val auth = userInfo.get("auth")
+        val authenticated = when {
+            auth == null -> false
             auth.isJsonPrimitive && auth.asJsonPrimitive.isNumber -> auth.asInt == 1
             auth.isJsonPrimitive && auth.asJsonPrimitive.isBoolean -> auth.asBoolean
             auth.isJsonPrimitive && auth.asJsonPrimitive.isString ->
                 auth.asString == "1" || auth.asString.equals("true", ignoreCase = true)
             else -> false
         }
+
+        if (!authenticated) {
+            return@withContext "Invalid credentials. Check your username and password."
+        }
+
+        // Check if account is expired
+        val status = userInfo.str("status")?.lowercase()
+        if (status == "expired" || status == "disabled") {
+            return@withContext "Your account has expired. Please contact your provider to renew."
+        }
+
+        // Also check exp_date — some panels set auth=1 but the account is past expiration
+        val expDate = userInfo.str("exp_date")
+        if (expDate != null && expDate != "0" && expDate != "null") {
+            try {
+                val expMs = expDate.toLong() * 1000
+                if (expMs < System.currentTimeMillis()) {
+                    return@withContext "Your account has expired. Please contact your provider to renew."
+                }
+            } catch (_: NumberFormatException) { /* ignore unparseable dates */ }
+        }
+
+        null // success
     }
 
     suspend fun getAccountExpirationMs(creds: Credentials): Long? = withContext(Dispatchers.IO) {

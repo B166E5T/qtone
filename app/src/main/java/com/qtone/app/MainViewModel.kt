@@ -352,9 +352,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Strip ALL invisible / non-printable characters from user input.
+     * The Fire TV on-screen keyboard sometimes inserts characters like
+     * non-breaking space (U+00A0), zero-width space (U+200B), or BOM
+     * (U+FEFF) that are invisible on screen but break authentication
+     * when URL-encoded and sent to Xtream panels.
+     */
+    private fun sanitizeInput(raw: String): String {
+        return raw
+            .replace("\uFEFF", "")   // BOM
+            .replace("\u200B", "")   // zero-width space
+            .replace("\u200C", "")   // zero-width non-joiner
+            .replace("\u200D", "")   // zero-width joiner
+            .replace("\u00A0", " ")  // non-breaking space → normal space
+            .replace("\u2007", " ")  // figure space
+            .replace("\u202F", " ")  // narrow no-break space
+            .replace("\u2060", "")   // word joiner
+            .trim()
+    }
+
     fun login(server: String, username: String, password: String) {
-        val normalizedServer = server.trim().trimEnd('/')
-        val creds = Credentials(normalizedServer, username.trim(), password.trim())
+        val normalizedServer = sanitizeInput(server).trimEnd('/')
+        val creds = Credentials(normalizedServer, sanitizeInput(username), sanitizeInput(password))
         if (creds.server.isBlank() || creds.username.isBlank() || creds.password.isBlank()) {
             _state.value = _state.value.copy(error = "Please enter server, username, and password.")
             return
@@ -363,9 +383,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 _state.value = _state.value.copy(error = null, loading = false, loggedIn = true, credentials = creds)
-                val ok = client.login(creds)
-                if (!ok) {
-                    _state.value = _state.value.copy(loggedIn = false, error = "Invalid Xtream credentials.")
+                val loginError = client.login(creds)
+                if (loginError != null) {
+                    _state.value = _state.value.copy(loggedIn = false, error = loginError)
                     return@launch
                 }
                 val expirationMs = withTimeoutOrNull(12_000L) {
@@ -416,12 +436,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     credentials = creds
                 )
 
-                val ok = withTimeoutOrNull(20_000L) {
-                    withContext(Dispatchers.IO) { client.login(creds) }
-                } ?: false
+                val loginError = withContext(Dispatchers.IO) { client.login(creds) }
 
-                if (!ok) {
-                    _state.value = _state.value.copy(updating = false, error = "Invalid Xtream URL or credentials.")
+                if (loginError != null) {
+                    _state.value = _state.value.copy(updating = false, error = loginError)
                     return@launch
                 }
 
