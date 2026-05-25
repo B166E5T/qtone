@@ -1,6 +1,6 @@
 {
-  "versionCode": 103,
-  "versionName": "1.0.3",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.3/qtone-v1.0.3.apk",
-  "changelog": "Bypass ISP blocking, better login error messages"
+  "versionCode": 104,
+  "versionName": "1.0.4",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.4/qtone-v1.0.4.apk",
+  "changelog": "Performance improvements"
 }
