@@ -29,6 +29,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -788,7 +789,9 @@ fun MoviePosterTile(
     onClick: () -> Unit,
     onLongPress: () -> Unit,
     modifier: Modifier = Modifier,
-    focusedScale: Float = 1.08f
+    focusedScale: Float = 1.08f,
+    showGlow: Boolean = true,
+    animationStiffness: Float = 2500f
 ) {
     // Migrated to androidx.tv.material3.Surface (the TV-optimized variant).
     //
@@ -818,19 +821,24 @@ fun MoviePosterTile(
     // that does not trigger relayout. So even though the animation value lives
     // in Compose state, the visible motion is hardware-accelerated.
     var focused by remember { mutableStateOf(false) }
-    val glowColor = rememberDominantColor(item.poster, focused)
+    val glowColor = if (showGlow) rememberDominantColor(item.poster, focused) else DEFAULT_GLOW_COLOR
     val animatedScale by animateFloatAsState(
         targetValue = if (focused) focusedScale else 1.0f,
-        // High stiffness = fast, snappy scale that settles in ~100ms.
-        // The scroll spec uses StiffnessMediumLow (400f) to feel buttery
-        // over distance, but the focus-scale pop should feel immediate —
-        // like the card is "jumping out" at you. 2500f hits that target
-        // without any visible lag. DampingRatioNoBouncy prevents overshoot.
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = 2500f
+            stiffness = animationStiffness
         ),
         label = "tileScale"
+    )
+
+    // Animated glow opacity — only draws when focused and showGlow is true.
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (focused && showGlow) 0.55f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = animationStiffness
+        ),
+        label = "glowAlpha"
     )
 
     TvSurface(
@@ -839,6 +847,32 @@ fun MoviePosterTile(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(0.66f)
+            .drawBehind {
+                // Smooth poster-colored glow using 12 layered rounded rects
+                // with exponential alpha falloff. More layers = smoother
+                // gradient that closely mimics a real gaussian blur.
+                // Works identically on Fire OS, Google TV, Shield — all devices.
+                if (glowAlpha > 0f) {
+                    val layers = 12
+                    for (i in layers downTo 1) {
+                        val fraction = i.toFloat() / layers
+                        val spread = (fraction * 26).dp.toPx()
+                        // Exponential falloff: outer layers fade much faster
+                        val layerAlpha = glowAlpha * (1f - fraction) * (1f - fraction)
+                        drawRoundRect(
+                            color = glowColor.copy(alpha = layerAlpha),
+                            topLeft = androidx.compose.ui.geometry.Offset(-spread, -spread),
+                            size = androidx.compose.ui.geometry.Size(
+                                size.width + spread * 2,
+                                size.height + spread * 2
+                            ),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                                (10.dp.toPx() + spread)
+                            )
+                        )
+                    }
+                }
+            }
             .graphicsLayer {
                 scaleX = animatedScale
                 scaleY = animatedScale
@@ -858,17 +892,15 @@ fun MoviePosterTile(
             focusedContentColor = QtoneColors.Text
         ),
         // Library scale disabled (1.0) — we drive scale manually above. The
-        // library's border and glow paths are still used though, which is why
+        // library's border path is still used though, which is why
         // we keep the TvSurface.
         scale = ClickableSurfaceDefaults.scale(
             focusedScale = 1.0f
         ),
-        // Poster-colored glow on focus — extracted from the dominant color
-        // of the poster image. Only renders when focused (one card at a time),
-        // so the performance cost is a single shadow draw per frame.
+        // Glow disabled — handled by custom drawBehind above.
         glow = ClickableSurfaceDefaults.glow(
             glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
-            focusedGlow = Glow(elevationColor = glowColor, elevation = 22.dp)
+            focusedGlow = Glow(elevationColor = Color.Transparent, elevation = 0.dp)
         ),
         // Focus indication = thin white outline. No border at rest (the poster
         // image edge defines the card on a black background). On focus a
@@ -1423,10 +1455,15 @@ fun MovieDetailScreen(
                             onFocused = { focusedSimilarId = similar.id },
                             onClick = { onSimilarOpen(similar) },
                             onLongPress = { onToggleSimilarFavorite(similar) },
-                            // Slightly larger pop than the main grid (1.08f) to
+                            // Same scale as the main grid (1.08f) to
                             // compensate for the smaller card size (130dp vs ~172dp)
                             // so the focus scale feels equally prominent.
                             focusedScale = 1.15f,
+                            showGlow = false,
+                            // Higher stiffness compensates for the larger scale
+                            // distance (0.15 vs 0.08) so the animation settles
+                            // just as fast as the main grid cards.
+                            animationStiffness = 4500f,
                             modifier = tileFocusModifier
                         )
                     }

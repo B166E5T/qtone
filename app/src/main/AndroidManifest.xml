@@ -55,6 +55,8 @@
             android:screenOrientation="landscape" />
         <activity
             android:name=".MainActivity"
+            android:banner="@drawable/tv_banner"
+            android:icon="@mipmap/ic_launcher"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true"
             android:screenOrientation="landscape">
