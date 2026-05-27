@@ -294,7 +294,7 @@ class XtreamClient {
         // Spectrum, AT&T) which block plain HTTP requests to IPTV panels.
         // The ISP sees encrypted traffic to Render.com — indistinguishable
         // from any regular HTTPS website visit.
-        private const val RELAY_URL = "https://qtone-relay.alvaroalfonso22.workers.dev/"
+        private const val RELAY_URL = "http://45.77.204.189:3000/"
     }
 
     private fun getJson(creds: Credentials, action: String?): JsonElement? {
