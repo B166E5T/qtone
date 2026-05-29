@@ -38,6 +38,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.graphics.Brush
@@ -48,6 +51,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
+import com.qtone.app.ui.rememberIsTV
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -290,6 +294,7 @@ private fun QtonePlayerOverlay(
     showResumePrompt: Boolean,
     resumePosition: Long
 ) {
+    val isTV = rememberIsTV()
     var isPlaying by remember { mutableStateOf(player?.isPlaying == true) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -612,6 +617,19 @@ private fun QtonePlayerOverlay(
                 }
             }
     ) {
+        // Touch overlay for phones/tablets — tap the player area to toggle OSD.
+        // Rendered first so it sits behind all OSD content, allowing OSD
+        // controls to receive their own touches. On TV this is never composed.
+        // Hidden when audio/subtitle menu is open so popup items receive taps.
+        if (!isTV && !showAudioMenu && !showSubtitleMenu) {
+            Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    osdVisible = !osdVisible
+                    osdActivityTick += 1
+                })
+            })
+        }
+
         if (osdVisible) {
         // Live-TV-style bottom OSD: one translucent rounded panel holding seek bar, metadata, and controls.
         Column(
@@ -729,11 +747,27 @@ private fun QtonePlayerOverlay(
 
         }
 
+        if (osdVisible && (showAudioMenu || showSubtitleMenu) && !isTV) {
+            // Dismissal overlay — tapping outside the popup closes it
+            Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    showAudioMenu = false
+                    showSubtitleMenu = false
+                    osdActivityTick += 1
+                })
+            })
+        }
+
         if (osdVisible && showAudioMenu) {
             TrackPickerPopup(
                 title = "Audio",
                 options = audioTracks.map { it.label },
                 selectedIndex = audioMenuIndex,
+                onSelect = { index ->
+                    audioTracks.getOrNull(index)?.let { player?.selectTrack(it) }
+                    showAudioMenu = false
+                    osdActivityTick += 1
+                },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 34.dp, bottom = 96.dp)
@@ -745,6 +779,26 @@ private fun QtonePlayerOverlay(
                 title = "Subtitles",
                 options = listOf("Off") + subtitleTracks.map { it.label },
                 selectedIndex = subtitleMenuIndex,
+                onSelect = { index ->
+                    player?.let { p ->
+                        if (index == 0) {
+                            p.trackSelectionParameters = p.trackSelectionParameters
+                                .buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                .build()
+                        } else {
+                            subtitleTracks.getOrNull(index - 1)?.let { option ->
+                                p.trackSelectionParameters = p.trackSelectionParameters
+                                    .buildUpon()
+                                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                    .build()
+                                p.selectTrack(option)
+                            }
+                        }
+                    }
+                    showSubtitleMenu = false
+                    osdActivityTick += 1
+                },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 86.dp, bottom = 96.dp)
@@ -870,6 +924,7 @@ private fun TrackPickerPopup(
     title: String,
     options: List<String>,
     selectedIndex: Int,
+    onSelect: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -894,6 +949,7 @@ private fun TrackPickerPopup(
                         if (index == selectedIndex) Color(0xFFEAFBFF) else Color.Transparent,
                         RoundedCornerShape(8.dp)
                     )
+                    .clickable { onSelect(index) }
                     .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
                 Text(

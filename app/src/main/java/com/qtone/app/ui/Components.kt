@@ -4,10 +4,13 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -196,38 +199,48 @@ private fun EdgeFollowBringIntoView(content: @Composable () -> Unit) {
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun NavButton(label: String, selected: Boolean, icon: String, onClick: () -> Unit) {
+    val isTV = rememberIsTV()
     // The selected color stays a strong purple regardless of focus state, so
     // the user can see which section is active even when focus moves away.
     // The focus animation (scale + glow) provides additional emphasis on the
     // currently-focused button.
-    TvSurface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(58.dp),
-        shape = ClickableSurfaceDefaults.shape(
-            shape = RoundedCornerShape(8.dp),
-            focusedShape = RoundedCornerShape(8.dp)
-        ),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (selected) Color(0xFF1A1A1F) else Color.Transparent,
-            focusedContainerColor = if (selected) Color(0xFF1A1A1F) else Color(0xFF1F1A28),
-            contentColor = QtoneColors.Text,
-            focusedContentColor = QtoneColors.Text
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.0f),
-        // No glow on nav buttons. The focused container color (pill background)
-        // is the focus cue, matching Nextv's nav bar pattern.
-        glow = ClickableSurfaceDefaults.glow(
-            glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
-            focusedGlow = Glow(elevationColor = Color.Transparent, elevation = 0.dp)
-        ),
-        border = ClickableSurfaceDefaults.border(
-            border = TvBorder(border = BorderStroke(0.dp, Color.Transparent)),
-            focusedBorder = TvBorder(border = BorderStroke(0.dp, Color.Transparent))
-        )
-    ) {
-        Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(icon, fontSize = 21.sp, modifier = Modifier.width(32.dp))
-            Text(label, fontSize = 18.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+    Box {
+        TvSurface(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth().height(58.dp),
+            shape = ClickableSurfaceDefaults.shape(
+                shape = RoundedCornerShape(8.dp),
+                focusedShape = RoundedCornerShape(8.dp)
+            ),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = if (selected) Color(0xFF1A1A1F) else Color.Transparent,
+                focusedContainerColor = if (selected) Color(0xFF1A1A1F) else Color(0xFF1F1A28),
+                contentColor = QtoneColors.Text,
+                focusedContentColor = QtoneColors.Text
+            ),
+            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.0f),
+            // No glow on nav buttons. The focused container color (pill background)
+            // is the focus cue, matching Nextv's nav bar pattern.
+            glow = ClickableSurfaceDefaults.glow(
+                glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
+                focusedGlow = Glow(elevationColor = Color.Transparent, elevation = 0.dp)
+            ),
+            border = ClickableSurfaceDefaults.border(
+                border = TvBorder(border = BorderStroke(0.dp, Color.Transparent)),
+                focusedBorder = TvBorder(border = BorderStroke(0.dp, Color.Transparent))
+            )
+        ) {
+            Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(icon, fontSize = 21.sp, modifier = Modifier.width(32.dp))
+                Text(label, fontSize = 18.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+            }
+        }
+        // Touch overlay for phones/tablets — sits on top of TvSurface,
+        // never composed on TV devices, never modifies TvSurface internals.
+        if (!isTV) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) {
+                detectTapGestures(onTap = { onClick() })
+            })
         }
     }
 }
@@ -235,6 +248,7 @@ fun NavButton(label: String, selected: Boolean, icon: String, onClick: () -> Uni
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun CategoryRow(category: Category, selected: Boolean, onClick: () -> Unit) {
+    val isTV = rememberIsTV()
     // Nextv-style sidebar with three visible states:
     //
     //   1. FOCUSED (user is on this category) → WHITE PILL FILL + DARK TEXT
@@ -302,12 +316,13 @@ fun CategoryRow(category: Category, selected: Boolean, onClick: () -> Unit) {
         label = "categoryTextStartPad"
     )
 
-    TvSurface(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .onFocusChanged { focused = it.isFocused },
+    Box {
+        TvSurface(
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .onFocusChanged { focused = it.isFocused },
         shape = ClickableSurfaceDefaults.shape(
             shape = RoundedCornerShape(24.dp),
             focusedShape = RoundedCornerShape(24.dp)
@@ -374,6 +389,12 @@ fun CategoryRow(category: Category, selected: Boolean, onClick: () -> Unit) {
             }
         }
     }
+        if (!isTV) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) {
+                detectTapGestures(onTap = { onClick() })
+            })
+        }
+    }
 }
 
 @Composable
@@ -406,46 +427,54 @@ fun MediaGrid(
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun PosterTile(item: MediaItem, onFocused: () -> Unit, onClick: () -> Unit) {
+    val isTV = rememberIsTV()
     // Used by the search-results grid (5-column MediaGrid). Migrated to TV
     // Surface for the same focus-animation benefit as MoviePosterTile.
-    TvSurface(
-        onClick = onClick,
-        modifier = Modifier
-            .width(132.dp)
-            .height(184.dp)
-            .onFocusChanged { if (it.isFocused) onFocused() },
-        shape = ClickableSurfaceDefaults.shape(
-            shape = RoundedCornerShape(8.dp),
-            focusedShape = RoundedCornerShape(8.dp)
-        ),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.Black,
-            focusedContainerColor = Color.Black,
-            contentColor = QtoneColors.Text,
-            focusedContentColor = QtoneColors.Text
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
-        glow = ClickableSurfaceDefaults.glow(
-            glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
-            focusedGlow = Glow(elevationColor = Color.Transparent, elevation = 0.dp)
-        ),
-        border = ClickableSurfaceDefaults.border(
-            border = TvBorder(border = BorderStroke(0.dp, Color.Transparent)),
-            focusedBorder = TvBorder(border = BorderStroke(2.dp, Color.White))
-        )
-    ) {
-        Box(Modifier.fillMaxSize()) {
-            AsyncImage(
-                model = item.poster,
-                contentDescription = item.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+    Box {
+        TvSurface(
+            onClick = onClick,
+            modifier = Modifier
+                .width(132.dp)
+                .height(184.dp)
+                .onFocusChanged { if (it.isFocused) onFocused() },
+            shape = ClickableSurfaceDefaults.shape(
+                shape = RoundedCornerShape(8.dp),
+                focusedShape = RoundedCornerShape(8.dp)
+            ),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Color.Black,
+                focusedContainerColor = Color.Black,
+                contentColor = QtoneColors.Text,
+                focusedContentColor = QtoneColors.Text
+            ),
+            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
+            glow = ClickableSurfaceDefaults.glow(
+                glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
+                focusedGlow = Glow(elevationColor = Color.Transparent, elevation = 0.dp)
+            ),
+            border = ClickableSurfaceDefaults.border(
+                border = TvBorder(border = BorderStroke(0.dp, Color.Transparent)),
+                focusedBorder = TvBorder(border = BorderStroke(2.dp, Color.White))
             )
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xC0000000)))))
-            Column(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
-                Text(item.name, color = QtoneColors.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                item.year?.let { Text(it.take(4), color = QtoneColors.Muted, fontSize = 10.sp) }
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                AsyncImage(
+                    model = item.poster,
+                    contentDescription = item.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xC0000000)))))
+                Column(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
+                    Text(item.name, color = QtoneColors.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    item.year?.let { Text(it.take(4), color = QtoneColors.Muted, fontSize = 10.sp) }
+                }
             }
+        }
+        if (!isTV) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) {
+                detectTapGestures(onTap = { onClick() })
+            })
         }
     }
 }
@@ -793,6 +822,7 @@ fun MoviePosterTile(
     showGlow: Boolean = true,
     animationStiffness: Float = 2500f
 ) {
+    val isTV = rememberIsTV()
     // Migrated to androidx.tv.material3.Surface (the TV-optimized variant).
     //
     // The TV Surface comes with built-in focus animations that run on the render
@@ -841,10 +871,11 @@ fun MoviePosterTile(
         label = "glowAlpha"
     )
 
-    TvSurface(
-        onClick = onClick,
-        onLongClick = onLongPress,
-        modifier = modifier
+    Box {
+        TvSurface(
+            onClick = onClick,
+            onLongClick = onLongPress,
+            modifier = modifier
             .fillMaxWidth()
             .aspectRatio(0.66f)
             .drawBehind {
@@ -938,6 +969,15 @@ fun MoviePosterTile(
             }
         }
     }
+        if (!isTV) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongPress() }
+                )
+            })
+        }
+    }
 }
 
 @Composable
@@ -1018,6 +1058,7 @@ fun ChannelTile(
     onLongPress: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isTV = rememberIsTV()
     // Migrated to androidx.tv.material3.Surface. The Surface IS the focusable
     // logo container; the channel name is a non-focusable Text below it (sits
     // outside the Surface so it doesn't scale with the focus animation).
@@ -1035,7 +1076,8 @@ fun ChannelTile(
     )
 
     Column(modifier = modifier.width(126.dp)) {
-        TvSurface(
+        Box {
+            TvSurface(
             onClick = onClick,
             onLongClick = onLongPress,
             modifier = Modifier
@@ -1089,6 +1131,15 @@ fun ChannelTile(
                         modifier = Modifier.align(Alignment.TopEnd)
                     )
                 }
+            }
+        }
+            if (!isTV) {
+                Box(Modifier.matchParentSize().pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = { onLongPress() }
+                    )
+                })
             }
         }
 
@@ -1320,7 +1371,27 @@ fun MovieDetailScreen(
         visibleSimilar.firstOrNull { it.id == focusedSimilarId }?.let { onSimilarFocused(it) }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    val detailIsTV = rememberIsTV()
+
+    // On phones, lay out at TV resolution (960dp wide × 560dp tall) then
+    // scale the whole thing down proportionally. This makes the detail screen
+    // look exactly like the TV version, just smaller. On TV, no scaling.
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        val tvWidth = 960.dp
+        val tvHeight = 560.dp
+        val scaleX = if (!detailIsTV) maxWidth / tvWidth else 1f
+        val scaleY = if (!detailIsTV) maxHeight / tvHeight else 1f
+        val scale = if (!detailIsTV) minOf(scaleX, scaleY) else 1f
+
+        Box(
+            Modifier
+                .then(if (!detailIsTV) Modifier.width(tvWidth).height(tvHeight) else Modifier.fillMaxSize())
+                .graphicsLayer {
+                    this.scaleX = scale
+                    this.scaleY = scale
+                    transformOrigin = TransformOrigin(0f, 0f)
+                }
+        ) {
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.Black, Color(0xEE050506), Color(0x88050506)))))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xAA000000), Color.Transparent, Color(0xEE000000)))))
 
@@ -1455,14 +1526,8 @@ fun MovieDetailScreen(
                             onFocused = { focusedSimilarId = similar.id },
                             onClick = { onSimilarOpen(similar) },
                             onLongPress = { onToggleSimilarFavorite(similar) },
-                            // Same scale as the main grid (1.08f) to
-                            // compensate for the smaller card size (130dp vs ~172dp)
-                            // so the focus scale feels equally prominent.
                             focusedScale = 1.15f,
                             showGlow = false,
-                            // Higher stiffness compensates for the larger scale
-                            // distance (0.15 vs 0.08) so the animation settles
-                            // just as fast as the main grid cards.
                             animationStiffness = 4500f,
                             modifier = tileFocusModifier
                         )
@@ -1482,6 +1547,7 @@ fun MovieDetailScreen(
                     .padding(end = 42.dp)
             )
         }
+    }
     }
 }
 
@@ -1873,7 +1939,6 @@ private fun SimilarMovieHorizontalInfo(item: MediaItem?, modifier: Modifier = Mo
 
 
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LiveChannelListRow(
     item: MediaItem,
@@ -1884,6 +1949,7 @@ fun LiveChannelListRow(
     onClick: () -> Unit,
     onLongPress: () -> Unit
 ) {
+    val isTV = rememberIsTV()
     var focused by remember { mutableStateOf(false) }
     var favoritePressStartMs by remember { mutableStateOf(0L) }
     var favoriteLongPressFired by remember { mutableStateOf(false) }
@@ -1891,9 +1957,12 @@ fun LiveChannelListRow(
     fun isOkKey(key: Key): Boolean =
         key == Key.DirectionCenter || key == Key.Enter || key == Key.NumPadEnter
 
-
-    Surface(
-        modifier = modifier
+    Box {
+        Surface(
+            onClick = {
+                if (!favoriteLongPressFired) onClick()
+            },
+            modifier = modifier
             .fillMaxWidth()
             .height(50.dp)
             .onFocusChanged {
@@ -1928,11 +1997,7 @@ fun LiveChannelListRow(
                     }
                     else -> false
                 }
-            }
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongPress
-            ),
+            },
         shape = RoundedCornerShape(7.dp),
         color = when {
             selected -> Color(0xFF1A1A1F)
@@ -1958,6 +2023,15 @@ fun LiveChannelListRow(
             )
         }
     }
+        if (!isTV) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongPress() }
+                )
+            })
+        }
+    }
 }
 
 @OptIn(UnstableApi::class)
@@ -1967,6 +2041,7 @@ fun EmbeddedLivePlayer(
     modifier: Modifier = Modifier,
     onFullscreen: () -> Unit
 ) {
+    val isTV = rememberIsTV()
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
@@ -2001,6 +2076,14 @@ fun EmbeddedLivePlayer(
         ) {
             Text("Press OK on channel name or ☰ for fullscreen", color = QtoneColors.Text, fontSize = 12.sp)
         }
+
+        // Touch overlay for phones — tap the player to go fullscreen.
+        // Sits on top of the PlayerView so it intercepts touches.
+        if (!isTV) {
+            Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                detectTapGestures(onTap = { onFullscreen() })
+            })
+        }
     }
 }
 
@@ -2011,6 +2094,7 @@ fun FullscreenLivePlayer(
     title: String,
     onExitFullscreen: () -> Unit
 ) {
+    val isTV = rememberIsTV()
     var showOsd by remember { mutableStateOf(true) }
 
     BackHandler { onExitFullscreen() }
@@ -2083,6 +2167,13 @@ fun FullscreenLivePlayer(
             },
             modifier = Modifier.fillMaxSize()
         )
+
+        // Touch overlay for phones — tap to toggle OSD.
+        if (!isTV) {
+            Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                detectTapGestures(onTap = { toggleOsd() })
+            })
+        }
 
         if (showOsd) {
             Box(

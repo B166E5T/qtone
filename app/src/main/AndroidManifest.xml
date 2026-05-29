@@ -52,14 +52,14 @@
             android:name=".player.PlayerActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="false"
-            android:screenOrientation="landscape" />
+            android:screenOrientation="sensorLandscape" />
         <activity
             android:name=".MainActivity"
             android:banner="@drawable/tv_banner"
             android:icon="@mipmap/ic_launcher"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true"
-            android:screenOrientation="landscape">
+            android:screenOrientation="sensorLandscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
