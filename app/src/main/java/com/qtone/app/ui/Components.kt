@@ -8,7 +8,9 @@ import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.Key
@@ -1373,25 +1375,14 @@ fun MovieDetailScreen(
 
     val detailIsTV = rememberIsTV()
 
-    // On phones, lay out at TV resolution (960dp wide × 560dp tall) then
-    // scale the whole thing down proportionally. This makes the detail screen
-    // look exactly like the TV version, just smaller. On TV, no scaling.
+    // On phones, override the display density so Compose thinks the screen
+    // is 560dp tall. All dp values, text sizes, card sizes, and offsets
+    // render at the correct TV proportions — no visual transform needed.
+    // Touch coordinates are correct because content lays out natively.
+    // On TV, density is unchanged — zero impact.
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
-        val tvWidth = 960.dp
-        val tvHeight = 560.dp
-        val scaleX = if (!detailIsTV) maxWidth / tvWidth else 1f
-        val scaleY = if (!detailIsTV) maxHeight / tvHeight else 1f
-        val scale = if (!detailIsTV) minOf(scaleX, scaleY) else 1f
-
-        Box(
-            Modifier
-                .then(if (!detailIsTV) Modifier.width(tvWidth).height(tvHeight) else Modifier.fillMaxSize())
-                .graphicsLayer {
-                    this.scaleX = scale
-                    this.scaleY = scale
-                    transformOrigin = TransformOrigin(0f, 0f)
-                }
-        ) {
+        val content = @Composable {
+            Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.Black, Color(0xEE050506), Color(0x88050506)))))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xAA000000), Color.Transparent, Color(0xEE000000)))))
 
@@ -1548,6 +1539,23 @@ fun MovieDetailScreen(
             )
         }
     }
+    }
+
+        // Apply density override on phones, pass through on TV
+        if (detailIsTV) {
+            content()
+        } else {
+            val currentDensity = LocalDensity.current
+            val targetHeightDp = 560f
+            val screenHeightPx = with(currentDensity) { maxHeight.toPx() }
+            val scaledDensity = Density(
+                density = screenHeightPx / targetHeightDp,
+                fontScale = currentDensity.fontScale
+            )
+            CompositionLocalProvider(LocalDensity provides scaledDensity) {
+                content()
+            }
+        }
     }
 }
 
