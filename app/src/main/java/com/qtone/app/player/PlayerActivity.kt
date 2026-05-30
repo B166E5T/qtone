@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
@@ -173,6 +174,20 @@ class PlayerActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
+
+            // Netflix-style subtitles: white text, no background, dark outline
+            // for readability on both dark and bright scenes.
+            subtitleView?.setStyle(
+                androidx.media3.ui.CaptionStyleCompat(
+                    AndroidColor.WHITE,                          // foreground
+                    AndroidColor.TRANSPARENT,                    // background (no black box)
+                    AndroidColor.TRANSPARENT,                    // window color
+                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW, // soft shadow
+                    AndroidColor.BLACK,                          // edge color
+                    null                                         // default typeface
+                )
+            )
+            subtitleView?.setApplyEmbeddedStyles(false)
         }
 
         val overlay = ComposeView(this).apply {
@@ -311,6 +326,8 @@ private fun QtonePlayerOverlay(
     var showSubtitleMenu by remember { mutableStateOf(false) }
     var audioMenuIndex by remember { mutableStateOf(0) }
     var subtitleMenuIndex by remember { mutableStateOf(0) }
+    var activeAudioIndex by remember { mutableStateOf(0) }
+    var activeSubtitleIndex by remember { mutableStateOf(0) }
 
     val aspectIcon = when (resizeMode) {
         AspectRatioFrameLayout.RESIZE_MODE_FIT -> "⛶"
@@ -411,11 +428,15 @@ private fun QtonePlayerOverlay(
             2 -> fastForward()
             3 -> cycleAspect()
             4 -> if (subtitleTracks.isNotEmpty()) {
-                subtitleMenuIndex = 0
+                val idx = if (areSubtitlesDisabled(player)) 0 else findActiveTrackIndex(tracks, subtitleTracks, C.TRACK_TYPE_TEXT) + 1
+                subtitleMenuIndex = idx
+                activeSubtitleIndex = idx
                 showSubtitleMenu = true
             }
             5 -> if (audioTracks.isNotEmpty()) {
-                audioMenuIndex = 0
+                val idx = findActiveTrackIndex(tracks, audioTracks, C.TRACK_TYPE_AUDIO)
+                audioMenuIndex = idx
+                activeAudioIndex = idx
                 showAudioMenu = true
             }
         }
@@ -481,6 +502,7 @@ private fun QtonePlayerOverlay(
                         }
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                             audioTracks.getOrNull(audioMenuIndex)?.let { player?.selectTrack(it) }
+                            activeAudioIndex = audioMenuIndex
                             showAudioMenu = false
                             wakeOsd()
                             true
@@ -519,6 +541,7 @@ private fun QtonePlayerOverlay(
                                     player?.selectTrack(option)
                                 }
                             }
+                            activeSubtitleIndex = subtitleMenuIndex
                             showSubtitleMenu = false
                             wakeOsd()
                             true
@@ -594,7 +617,7 @@ private fun QtonePlayerOverlay(
                             if (!osdVisible) false else {
                                 osdActivityTick += 1
                                 if (selectedRow == 0) {
-                                    seekRelative(-300_000L)
+                                    seekRelative(-150_000L)
                                 } else {
                                     selectedControl = (selectedControl - 1).coerceAtLeast(0)
                                 }
@@ -605,7 +628,7 @@ private fun QtonePlayerOverlay(
                             if (!osdVisible) false else {
                                 osdActivityTick += 1
                                 if (selectedRow == 0) {
-                                    seekRelative(300_000L)
+                                    seekRelative(150_000L)
                                 } else {
                                     selectedControl = (selectedControl + 1).coerceAtMost(5)
                                 }
@@ -652,6 +675,10 @@ private fun QtonePlayerOverlay(
                     position = position,
                     duration = duration,
                     selected = selectedRow == 0,
+                    onSeek = { targetMs ->
+                        player?.seekTo(targetMs.coerceIn(0L, duration))
+                        osdActivityTick += 1
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(12.dp))
@@ -731,13 +758,17 @@ private fun QtonePlayerOverlay(
                     }
 
                     OsdIconButton("CC", "Subtitles", enabled = subtitleTracks.isNotEmpty(), selected = selectedRow == 1 && selectedControl == 4) {
-                        subtitleMenuIndex = 0
+                        val idx = if (areSubtitlesDisabled(player)) 0 else findActiveTrackIndex(tracks, subtitleTracks, C.TRACK_TYPE_TEXT) + 1
+                        subtitleMenuIndex = idx
+                        activeSubtitleIndex = idx
                         showSubtitleMenu = true
                         osdActivityTick += 1
                     }
 
                     OsdIconButton("♪", "Audio", enabled = audioTracks.isNotEmpty(), selected = selectedRow == 1 && selectedControl == 5) {
-                        audioMenuIndex = 0
+                        val idx = findActiveTrackIndex(tracks, audioTracks, C.TRACK_TYPE_AUDIO)
+                        audioMenuIndex = idx
+                        activeAudioIndex = idx
                         showAudioMenu = true
                         osdActivityTick += 1
                     }
@@ -763,8 +794,10 @@ private fun QtonePlayerOverlay(
                 title = "Audio",
                 options = audioTracks.map { it.label },
                 selectedIndex = audioMenuIndex,
+                activeIndex = activeAudioIndex,
                 onSelect = { index ->
                     audioTracks.getOrNull(index)?.let { player?.selectTrack(it) }
+                    activeAudioIndex = index
                     showAudioMenu = false
                     osdActivityTick += 1
                 },
@@ -779,6 +812,7 @@ private fun QtonePlayerOverlay(
                 title = "Subtitles",
                 options = listOf("Off") + subtitleTracks.map { it.label },
                 selectedIndex = subtitleMenuIndex,
+                activeIndex = activeSubtitleIndex,
                 onSelect = { index ->
                     player?.let { p ->
                         if (index == 0) {
@@ -796,6 +830,7 @@ private fun QtonePlayerOverlay(
                             }
                         }
                     }
+                    activeSubtitleIndex = index
                     showSubtitleMenu = false
                     osdActivityTick += 1
                 },
@@ -879,6 +914,7 @@ private fun FocusableSeekBar(
     position: Long,
     duration: Long,
     selected: Boolean,
+    onSeek: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val fraction = if (duration > 0L) {
@@ -897,7 +933,27 @@ private fun FocusableSeekBar(
                 if (selected) Color(0x55FFFFFF) else Color.Transparent,
                 RoundedCornerShape(17.dp)
             )
-            .padding(horizontal = if (selected) 8.dp else 0.dp),
+            .padding(horizontal = if (selected) 8.dp else 0.dp)
+            .pointerInput(duration) {
+                if (duration <= 0L) return@pointerInput
+                detectTapGestures(onTap = { offset ->
+                    val seekFraction = (offset.x / size.width).coerceIn(0f, 1f)
+                    onSeek((seekFraction * duration).toLong())
+                })
+            }
+            .pointerInput(duration) {
+                if (duration <= 0L) return@pointerInput
+                var dragging = false
+                detectDragGestures(
+                    onDragStart = { dragging = true },
+                    onDragEnd = { dragging = false },
+                    onDragCancel = { dragging = false },
+                    onDrag = { change, _ ->
+                        val seekFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                        onSeek((seekFraction * duration).toLong())
+                    }
+                )
+            },
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
@@ -924,6 +980,7 @@ private fun TrackPickerPopup(
     title: String,
     options: List<String>,
     selectedIndex: Int,
+    activeIndex: Int = -1,
     onSelect: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -952,13 +1009,19 @@ private fun TrackPickerPopup(
                     .clickable { onSelect(index) }
                     .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
-                Text(
-                    option,
-                    color = if (index == selectedIndex) Color.White else Color(0xFFD8D4E8),
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        option,
+                        color = if (index == selectedIndex) Color.White else Color(0xFFD8D4E8),
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (index == activeIndex) {
+                        Text("  ✓", color = Color(0xFF4CAF50), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }
@@ -1055,6 +1118,39 @@ private fun languageDisplayName(code: String?): String {
         "zh", "zho", "chi" -> "Chinese"
         else -> Locale(normalized.take(2)).displayLanguage.replaceFirstChar { it.titlecase(Locale.US) }
     }
+}
+
+/**
+ * Find the index of the currently selected track in our TrackOption list.
+ * Returns 0 if no match found.
+ */
+private fun findActiveTrackIndex(tracks: Tracks, options: List<TrackOption>, type: Int): Int {
+    for (group in tracks.groups) {
+        if (group.type != type) continue
+        for (i in 0 until group.length) {
+            if (group.isTrackSelected(i)) {
+                val matchIndex = options.indexOfFirst {
+                    it.group == group.mediaTrackGroup && it.trackIndex == i
+                }
+                if (matchIndex >= 0) return matchIndex
+            }
+        }
+    }
+    return 0
+}
+
+/**
+ * Check if subtitles are currently disabled by checking if any text track is selected.
+ */
+private fun areSubtitlesDisabled(player: ExoPlayer?): Boolean {
+    val tracks = player?.currentTracks ?: return true
+    for (group in tracks.groups) {
+        if (group.type != C.TRACK_TYPE_TEXT) continue
+        for (i in 0 until group.length) {
+            if (group.isTrackSelected(i)) return false
+        }
+    }
+    return true
 }
 
 private fun ExoPlayer.selectTrack(option: TrackOption) {

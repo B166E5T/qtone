@@ -1,6 +1,6 @@
 {
-  "versionCode": 111,
-  "versionName": "1.0.11",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.11/qtone-v1.0.11.apk",
-  "changelog": "added mobile device support"
+  "versionCode": 112,
+  "versionName": "1.0.12",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.12/qtone-v1.0.12.apk",
+  "changelog": "updated mobile device support and CC aesthetics"
 }
