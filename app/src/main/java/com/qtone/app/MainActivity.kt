@@ -328,6 +328,13 @@ class MainActivity : ComponentActivity() {
                         detailItem = next
                     },
                     onEpisodeOpen = { episode ->
+                        // Collect all episodes for this series, sorted by
+                        // season then episode number, for auto-play-next.
+                        val allEpisodes = state.seriesEpisodes[selected.id]
+                            .orEmpty()
+                            .sortedWith(compareBy({ it.seasonNumber }, { it.episodeNumber }))
+                        val currentIndex = allEpisodes.indexOfFirst { it.id == episode.id }
+
                         openItem(
                             MediaItem(
                                 id = episode.id,
@@ -337,7 +344,9 @@ class MainActivity : ComponentActivity() {
                                 poster = episode.poster ?: liveItem.poster,
                                 plot = episode.plot,
                                 streamUrl = episode.streamUrl
-                            )
+                            ),
+                            episodes = allEpisodes,
+                            episodeIndex = currentIndex
                         )
                     },
                     onPlay = { openItem(liveItem) }
@@ -609,7 +618,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openItem(item: MediaItem) {
+    private fun openItem(
+        item: MediaItem,
+        episodes: List<com.qtone.app.model.SeriesEpisode> = emptyList(),
+        episodeIndex: Int = -1
+    ) {
         if (item.streamUrl != null) {
             launchingPlayerActivity = true
             startActivity(Intent(this, PlayerActivity::class.java).apply {
@@ -622,6 +635,10 @@ class MainActivity : ComponentActivity() {
                 putExtra("genre", item.genre.orEmpty())
                 putExtra("year", item.year.orEmpty())
                 putExtra("plot", item.plot.orEmpty())
+                if (episodes.isNotEmpty() && episodeIndex >= 0) {
+                    putExtra("episodes_json", com.google.gson.Gson().toJson(episodes))
+                    putExtra("episode_index", episodeIndex)
+                }
             })
         }
     }

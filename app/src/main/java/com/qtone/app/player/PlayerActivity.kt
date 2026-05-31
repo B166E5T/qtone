@@ -73,6 +73,16 @@ import java.util.Locale
 class PlayerActivity : ComponentActivity() {
     private var player: ExoPlayer? = null
 
+    // Mutable tracking for auto-play-next-episode.
+    // Updated when advancing to the next episode so saveMovieProgress
+    // and the OSD always reflect the currently-playing episode.
+    private var currentItemId = ""
+    private val currentTitle = androidx.compose.runtime.mutableStateOf("")
+    private var currentSeriesId = ""
+    private val currentPlot = androidx.compose.runtime.mutableStateOf("")
+    private var currentEpisodeIndex = -1
+    private var episodesList: List<com.qtone.app.model.SeriesEpisode> = emptyList()
+
     @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,6 +98,25 @@ class PlayerActivity : ComponentActivity() {
         val year = intent.getStringExtra("year").orEmpty()
         val plot = intent.getStringExtra("plot").orEmpty()
         val prefs = getSharedPreferences("qtone_session", Context.MODE_PRIVATE)
+
+        // Initialize mutable tracking
+        currentItemId = itemId
+        currentTitle.value = title
+        currentSeriesId = seriesId
+        currentPlot.value = plot
+
+        // Parse episode list for auto-play-next
+        val episodesJson = intent.getStringExtra("episodes_json").orEmpty()
+        if (episodesJson.isNotBlank()) {
+            try {
+                val type = object : com.google.gson.reflect.TypeToken<List<com.qtone.app.model.SeriesEpisode>>() {}.type
+                episodesList = com.google.gson.Gson().fromJson(episodesJson, type)
+                currentEpisodeIndex = intent.getIntExtra("episode_index", -1)
+            } catch (_: Exception) {
+                episodesList = emptyList()
+                currentEpisodeIndex = -1
+            }
+        }
 
         val progressPrefix = when (streamType) {
             "movie" -> "movie"
@@ -148,6 +177,41 @@ class PlayerActivity : ComponentActivity() {
                         loadUrl(nextUrl, resumePosition)
                     }
                 }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_ENDED && streamType == "series_episode") {
+                        // Mark current episode as watched
+                        val store = com.qtone.app.storage.SessionStore(this@PlayerActivity)
+                        store.markEpisodeWatched(currentItemId)
+
+                        // Clear progress for completed episode
+                        getSharedPreferences("qtone_session", Context.MODE_PRIVATE).edit()
+                            .remove("series_episode_position_$currentItemId")
+                            .remove("series_episode_duration_$currentItemId")
+                            .apply()
+
+                        // Auto-play next episode if available
+                        val nextIndex = currentEpisodeIndex + 1
+                        if (nextIndex < episodesList.size) {
+                            val nextEp = episodesList[nextIndex]
+                            if (!nextEp.streamUrl.isNullOrBlank()) {
+                                currentEpisodeIndex = nextIndex
+                                currentItemId = nextEp.id
+                                currentTitle.value = nextEp.title
+                                currentPlot.value = nextEp.plot.orEmpty()
+
+                                // Update continue-watching pointer
+                                if (currentSeriesId.isNotBlank()) {
+                                    getSharedPreferences("qtone_session", Context.MODE_PRIVATE).edit()
+                                        .putString("series_continue_episode_$currentSeriesId", nextEp.id)
+                                        .apply()
+                                }
+
+                                loadUrl(nextEp.streamUrl!!)
+                            }
+                        }
+                    }
+                }
             })
 
             loadUrl(url, if (showResumePrompt) 0L else resumePosition)
@@ -202,11 +266,11 @@ class PlayerActivity : ComponentActivity() {
                 QtonePlayerOverlay(
                     player = player,
                     playerView = playerView,
-                    title = title,
+                    title = currentTitle.value,
                     rating = rating,
                     genre = genre,
                     year = year,
-                    plot = plot,
+                    plot = currentPlot.value,
                     showResumePrompt = showResumePrompt,
                     resumePosition = resumePosition
                 )
@@ -232,9 +296,9 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun saveMovieProgress() {
-        val itemId = intent.getStringExtra("item_id").orEmpty()
+        val itemId = currentItemId
         val streamType = intent.getStringExtra("stream_type").orEmpty()
-        val seriesId = intent.getStringExtra("series_id").orEmpty()
+        val seriesId = currentSeriesId
         val progressPrefix = when (streamType) {
             "movie" -> "movie"
             "series_episode" -> "series_episode"
