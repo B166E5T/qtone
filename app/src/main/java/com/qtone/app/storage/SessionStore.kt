@@ -16,21 +16,23 @@ class SessionStore(private val context: Context) {
 
     private fun writeCacheFile(key: String, json: String) {
         val target = cacheFile(key)
-        val tmp = java.io.File(cacheDir, "$key.json.tmp")
-        tmp.writeText(json)
-        if (!tmp.renameTo(target)) {
-            target.delete()
-            tmp.renameTo(target)
+        try {
+            java.io.FileOutputStream(target).use { fos ->
+                fos.write(json.toByteArray(Charsets.UTF_8))
+                fos.flush()
+                fos.fd.sync()
+            }
+        } catch (_: Throwable) {
+            try { target.writeText(json) } catch (_: Throwable) {}
         }
     }
 
     private fun readCacheFile(key: String): String? {
         val file = cacheFile(key)
-        return if (file.exists()) {
-            try { file.readText() } catch (_: Throwable) { null }
-        } else {
-            null
+        if (file.exists() && file.length() > 0L) {
+            try { return file.readText() } catch (_: Throwable) {}
         }
+        return null
     }
 
     fun saveCredentials(creds: Credentials) {
@@ -124,18 +126,19 @@ class SessionStore(private val context: Context) {
         movies: List<MediaItem>,
         series: List<MediaItem>
     ) {
-        try {
-            // Large IPTV provider lists should not be stored in SharedPreferences.
-            // Rewriting huge SharedPreferences XML during Update can freeze/crash Firestick.
-            // Store large lists as separate files instead.
-            writeCacheFile("live_categories", gson.toJson(liveCategories))
-            writeCacheFile("movie_categories", gson.toJson(movieCategories))
-            writeCacheFile("series_categories", gson.toJson(seriesCategories))
-            writeCacheFile("live_items", gson.toJson(live))
-            writeCacheFile("movie_items", gson.toJson(movies))
-            writeCacheFile("series_items", gson.toJson(series))
+        // Each write is isolated so a failure on one large file (e.g. OOM
+        // during gson.toJson on a huge movie list) doesn't prevent the
+        // others from being written. Previously a single try-catch wrapped
+        // all six writes — if movies threw, series never ran.
+        safeWriteCacheFile("live_categories", liveCategories)
+        safeWriteCacheFile("movie_categories", movieCategories)
+        safeWriteCacheFile("series_categories", seriesCategories)
+        safeWriteCacheFile("live_items", live)
+        safeWriteCacheFile("movie_items", movies)
+        safeWriteCacheFile("series_items", series)
 
-            // Remove old large SharedPreferences cache keys from earlier builds.
+        // Remove old large SharedPreferences cache keys from earlier builds.
+        try {
             prefs.edit()
                 .remove("live_categories")
                 .remove("movie_categories")
@@ -144,9 +147,32 @@ class SessionStore(private val context: Context) {
                 .remove("movie_items")
                 .remove("series_items")
                 .apply()
+        } catch (_: Throwable) {}
+    }
+
+    private fun <T> safeWriteCacheFile(key: String, value: T) {
+        try {
+            val json = gson.toJson(value)
+            writeCacheFile(key, json)
         } catch (_: Throwable) {
-            // Cache is helpful but should never crash update/login.
+            // If the serialization itself throws (e.g. OOM on a huge list),
+            // try writing in chunks to reduce peak memory pressure.
+            tryChunkedWrite(key, value)
         }
+    }
+
+    private fun <T> tryChunkedWrite(key: String, value: T) {
+        try {
+            // Stream JSON directly to disk via JsonWriter — avoids holding
+            // the entire serialized string in memory at once.
+            val target = cacheFile(key)
+            java.io.FileOutputStream(target).use { fos ->
+                fos.bufferedWriter(Charsets.UTF_8).use { bw ->
+                    gson.toJson(value, value!!::class.java, bw)
+                }
+                try { fos.fd.sync() } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
     }
 
     private inline fun <reified T> readList(key: String): List<T> {
