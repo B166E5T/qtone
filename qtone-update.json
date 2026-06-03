@@ -1,6 +1,6 @@
 {
-  "versionCode": 114,
-  "versionName": "1.0.14",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.14/qtone-v1.0.14.apk",
+  "versionCode": 115,
+  "versionName": "1.0.15",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.15/qtone-v1.0.15.apk",
   "changelog": "Fixed tablet empty content cards after close and reopen of app"
 }

@@ -27,7 +27,7 @@ class XtreamClient {
         // Falls back to system DNS if Cloudflare is unreachable.
         val bootstrap = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
         val doh = okhttp3.dnsoverhttps.DnsOverHttps.Builder()
             .client(bootstrap)
@@ -47,7 +47,7 @@ class XtreamClient {
         OkHttpClient.Builder()
             .dns(fallbackDns)
             .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 chain.proceed(
                     chain.request().newBuilder()
@@ -227,54 +227,183 @@ class XtreamClient {
 
 
     suspend fun getSeriesEpisodes(creds: Credentials, seriesId: String): List<SeriesEpisode> = withContext(Dispatchers.IO) {
-        val root = getJson(creds, "get_series_info&series_id=$seriesId") as? JsonObject ?: return@withContext emptyList()
-        val episodesObj = root.getAsJsonObject("episodes") ?: return@withContext emptyList()
         val base = creds.server.trimEnd('/')
+        val u = URLEncoder.encode(creds.username, "UTF-8")
+        val p = URLEncoder.encode(creds.password, "UTF-8")
+        val targetUrl = "$base/player_api.php?username=$u&password=$p&action=get_series_info&series_id=$seriesId"
 
-        episodesObj.entrySet().flatMap { seasonEntry ->
-            val seasonNumber = seasonEntry.key.toIntOrNull() ?: 0
-            val arr = seasonEntry.value as? JsonArray ?: return@flatMap emptyList()
+        val req = Request.Builder()
+            .url(RELAY_URL)
+            .header("X-Target-URL", targetUrl)
+            .build()
 
-            arr.mapNotNull { element ->
-                val episode = element.asJsonObject
-                val id = episode.str("id") ?: episode.str("episode_id") ?: return@mapNotNull null
-                val info = episode.getAsJsonObject("info")
-
-                val extension = episode.str("container_extension")
-                    ?: episode.str("containerExtension")
-                    ?: "mp4"
-
-                val episodeNumber = episode.str("episode_num")?.toIntOrNull()
-                    ?: episode.str("episode")?.toIntOrNull()
-                    ?: episode.str("episode_number")?.toIntOrNull()
-                    ?: 0
-
-                SeriesEpisode(
-                    id = id,
-                    seriesId = seriesId,
-                    seasonNumber = seasonNumber,
-                    episodeNumber = episodeNumber,
-                    title = episode.str("title")
-                        ?: episode.str("name")
-                        ?: "Episode $episodeNumber",
-                    plot = info?.str("plot")
-                        ?: info?.str("description")
-                        ?: episode.str("plot")
-                        ?: episode.str("description"),
-                    poster = info?.str("movie_image")
-                        ?: info?.str("cover_big")
-                        ?: info?.str("cover")
-                        ?: episode.str("movie_image"),
-                    duration = info?.str("duration") ?: episode.str("duration"),
-                    rating = info?.str("rating") ?: episode.str("rating"),
-                    releaseDate = info?.str("releasedate")
-                        ?: info?.str("release_date")
-                        ?: episode.str("releasedate")
-                        ?: episode.str("release_date"),
-                    streamUrl = "$base/series/${creds.username}/${creds.password}/$id.$extension"
-                )
+        // Stream-parse the JSON to avoid OOM on massive series (500-1000+ episodes).
+        // The full response can be 5-10MB; loading it into a Gson tree uses 50-100MB
+        // and OOMs on Fire Stick. JsonReader reads tokens one at a time and we build
+        // SeriesEpisode objects incrementally, keeping memory usage flat.
+        try {
+            http.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) return@withContext emptyList<SeriesEpisode>()
+                val body = res.body ?: return@withContext emptyList<SeriesEpisode>()
+                val reader = JsonReader(body.charStream())
+                reader.isLenient = true
+                return@withContext streamParseEpisodes(reader, seriesId, base, creds)
             }
-        }.sortedWith(compareBy<SeriesEpisode> { it.seasonNumber }.thenBy { it.episodeNumber })
+        } catch (_: Throwable) {
+            return@withContext emptyList<SeriesEpisode>()
+        }
+    }
+
+    private fun streamParseEpisodes(
+        reader: JsonReader,
+        seriesId: String,
+        base: String,
+        creds: Credentials
+    ): List<SeriesEpisode> {
+        val episodes = mutableListOf<SeriesEpisode>()
+        try {
+            reader.beginObject()
+            while (reader.hasNext()) {
+                val name = reader.nextName()
+                if (name == "episodes") {
+                    val token = reader.peek()
+                    when (token) {
+                        com.google.gson.stream.JsonToken.BEGIN_OBJECT -> {
+                            // Standard format: {"1": [...], "2": [...]}
+                            reader.beginObject()
+                            while (reader.hasNext()) {
+                                val seasonKey = reader.nextName()
+                                val seasonNumber = seasonKey.toIntOrNull() ?: 0
+                                if (reader.peek() == com.google.gson.stream.JsonToken.BEGIN_ARRAY) {
+                                    reader.beginArray()
+                                    while (reader.hasNext()) {
+                                        readEpisodeObject(reader, seriesId, seasonNumber, base, creds)?.let { episodes.add(it) }
+                                    }
+                                    reader.endArray()
+                                } else {
+                                    reader.skipValue()
+                                }
+                            }
+                            reader.endObject()
+                        }
+                        com.google.gson.stream.JsonToken.BEGIN_ARRAY -> {
+                            // Flat array format
+                            reader.beginArray()
+                            while (reader.hasNext()) {
+                                readEpisodeObject(reader, seriesId, 1, base, creds)?.let { episodes.add(it) }
+                            }
+                            reader.endArray()
+                        }
+                        else -> reader.skipValue()
+                    }
+                } else {
+                    reader.skipValue()
+                }
+            }
+            reader.endObject()
+        } catch (_: Throwable) {
+            // Whatever we collected so far is returned
+        }
+        return episodes.sortedWith(compareBy<SeriesEpisode> { it.seasonNumber }.thenBy { it.episodeNumber })
+    }
+
+    private fun readEpisodeObject(
+        reader: JsonReader,
+        seriesId: String,
+        defaultSeason: Int,
+        base: String,
+        creds: Credentials
+    ): SeriesEpisode? {
+        var id: String? = null
+        var episodeNumber = 0
+        var seasonNumber = defaultSeason
+        var title: String? = null
+        var plot: String? = null
+        var poster: String? = null
+        var duration: String? = null
+        var rating: String? = null
+        var releaseDate: String? = null
+        var extension = "mp4"
+
+        try {
+            reader.beginObject()
+            while (reader.hasNext()) {
+                val key = reader.nextName()
+                when (key) {
+                    "id", "episode_id" -> if (id == null) id = readStringSafe(reader)
+                    "episode_num", "episode", "episode_number" -> {
+                        readStringSafe(reader)?.toIntOrNull()?.let { episodeNumber = it }
+                    }
+                    "season", "season_number" -> {
+                        readStringSafe(reader)?.toIntOrNull()?.let { seasonNumber = it }
+                    }
+                    "title", "name" -> if (title == null) title = readStringSafe(reader)
+                    "container_extension", "containerExtension" -> {
+                        readStringSafe(reader)?.let { extension = it }
+                    }
+                    "info" -> {
+                        // Nested info object
+                        if (reader.peek() == com.google.gson.stream.JsonToken.BEGIN_OBJECT) {
+                            reader.beginObject()
+                            while (reader.hasNext()) {
+                                val infoKey = reader.nextName()
+                                when (infoKey) {
+                                    "plot", "description" -> if (plot == null) plot = readStringSafe(reader)
+                                    "movie_image", "cover_big", "cover" -> if (poster == null) poster = readStringSafe(reader)
+                                    "duration" -> if (duration == null) duration = readStringSafe(reader)
+                                    "rating" -> if (rating == null) rating = readStringSafe(reader)
+                                    "releasedate", "release_date" -> if (releaseDate == null) releaseDate = readStringSafe(reader)
+                                    "season" -> readStringSafe(reader)?.toIntOrNull()?.let { seasonNumber = it }
+                                    else -> reader.skipValue()
+                                }
+                            }
+                            reader.endObject()
+                        } else {
+                            reader.skipValue()
+                        }
+                    }
+                    "plot", "description" -> if (plot == null) plot = readStringSafe(reader)
+                    "movie_image" -> if (poster == null) poster = readStringSafe(reader)
+                    "duration" -> if (duration == null) duration = readStringSafe(reader)
+                    "rating" -> if (rating == null) rating = readStringSafe(reader)
+                    "releasedate", "release_date" -> if (releaseDate == null) releaseDate = readStringSafe(reader)
+                    else -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+        } catch (_: Throwable) {
+            return null
+        }
+
+        if (id == null) return null
+        return SeriesEpisode(
+            id = id!!,
+            seriesId = seriesId,
+            seasonNumber = seasonNumber,
+            episodeNumber = episodeNumber,
+            title = title ?: "Episode $episodeNumber",
+            plot = plot,
+            poster = poster,
+            duration = duration,
+            rating = rating,
+            releaseDate = releaseDate,
+            streamUrl = "$base/series/${creds.username}/${creds.password}/$id.$extension"
+        )
+    }
+
+    private fun readStringSafe(reader: JsonReader): String? {
+        return try {
+            when (reader.peek()) {
+                com.google.gson.stream.JsonToken.STRING -> reader.nextString()
+                com.google.gson.stream.JsonToken.NUMBER -> reader.nextString()
+                com.google.gson.stream.JsonToken.BOOLEAN -> reader.nextBoolean().toString()
+                com.google.gson.stream.JsonToken.NULL -> { reader.nextNull(); null }
+                else -> { reader.skipValue(); null }
+            }
+        } catch (_: Throwable) {
+            try { reader.skipValue() } catch (_: Throwable) {}
+            null
+        }
     }
 
     private suspend fun categories(creds: Credentials, action: String): List<Category> = withContext(Dispatchers.IO) {
