@@ -150,7 +150,12 @@ class PlayerActivity : ComponentActivity() {
         }
         var movieFallbackIndex = 0
 
-        player = ExoPlayer.Builder(this).build().also { exo ->
+        val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setUserAgent("Q/1.0")
+            .setAllowCrossProtocolRedirects(true)
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(httpDataSourceFactory)
+        player = ExoPlayer.Builder(this).setMediaSourceFactory(mediaSourceFactory).build().also { exo ->
             fun loadUrl(playUrl: String, seekMs: Long = 0L) {
                 exo.setMediaItem(
                     MediaItem.Builder()

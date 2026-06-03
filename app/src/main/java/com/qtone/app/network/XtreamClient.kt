@@ -1,5 +1,4 @@
 package com.qtone.app.network
-
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -10,6 +9,7 @@ import com.qtone.app.model.Credentials
 import com.qtone.app.model.MediaItem
 import com.qtone.app.model.SeriesEpisode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -17,7 +17,6 @@ import okhttp3.Request
 import java.io.StringReader
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
-
 class XtreamClient {
     private val http: OkHttpClient = run {
         // Use DNS-over-HTTPS (Cloudflare) to bypass ISP DNS filtering.
@@ -43,7 +42,6 @@ class XtreamClient {
                 }
             }
         }
-
         OkHttpClient.Builder()
             .dns(fallbackDns)
             .connectTimeout(12, TimeUnit.SECONDS)
@@ -57,7 +55,6 @@ class XtreamClient {
             }
             .build()
     }
-
     /**
      * Returns null on success, or a user-facing error string on failure.
      */
@@ -76,16 +73,13 @@ class XtreamClient {
                 else -> "Connection error. Check the server URL."
             }
         }
-
         if (obj == null || obj !is JsonObject) {
             return@withContext "Could not connect to server. Check the URL."
         }
-
         val userInfo = obj.getAsJsonObject("user_info")
         if (userInfo == null) {
             return@withContext "Invalid credentials. Check your username and password."
         }
-
         val auth = userInfo.get("auth")
         val authenticated = when {
             auth == null -> false
@@ -95,17 +89,14 @@ class XtreamClient {
                 auth.asString == "1" || auth.asString.equals("true", ignoreCase = true)
             else -> false
         }
-
         if (!authenticated) {
             return@withContext "Invalid credentials. Check your username and password."
         }
-
         // Check if account is expired
         val status = userInfo.str("status")?.lowercase()
         if (status == "expired" || status == "disabled") {
             return@withContext "Your account has expired. Please contact your provider to renew."
         }
-
         // Also check exp_date — some panels set auth=1 but the account is past expiration
         val expDate = userInfo.str("exp_date")
         if (expDate != null && expDate != "0" && expDate != "null") {
@@ -116,10 +107,8 @@ class XtreamClient {
                 }
             } catch (_: NumberFormatException) { /* ignore unparseable dates */ }
         }
-
         null // success
     }
-
     suspend fun getAccountExpirationMs(creds: Credentials): Long? = withContext(Dispatchers.IO) {
         val obj = getJson(creds, null) as? JsonObject ?: return@withContext null
         val userInfo = obj.getAsJsonObject("user_info") ?: return@withContext null
@@ -127,20 +116,15 @@ class XtreamClient {
             ?: userInfo.str("expiration")
             ?: userInfo.str("expires")
             ?: return@withContext null
-
         val value = raw.trim().toLongOrNull() ?: return@withContext null
         if (value <= 0L) null else if (value > 9_999_999_999L) value else value * 1000L
     }
-
     suspend fun getLiveCategories(creds: Credentials): List<Category> =
         categories(creds, "get_live_categories")
-
     suspend fun getMovieCategories(creds: Credentials): List<Category> =
         categories(creds, "get_vod_categories")
-
     suspend fun getSeriesCategories(creds: Credentials): List<Category> =
         categories(creds, "get_series_categories")
-
     suspend fun getLiveStreams(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
         val arr = getJson(creds, "get_live_streams") as? JsonArray ?: return@withContext emptyList()
         arr.mapNotNull { e ->
@@ -156,7 +140,6 @@ class XtreamClient {
             )
         }
     }
-
     suspend fun getMovies(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
         val arr = getJson(creds, "get_vod_streams") as? JsonArray ?: return@withContext emptyList()
         arr.mapNotNull { e ->
@@ -179,12 +162,9 @@ class XtreamClient {
             )
         }
     }
-
-
     suspend fun getVodInfo(creds: Credentials, vodId: String): MediaItem? = withContext(Dispatchers.IO) {
         val root = getJson(creds, "get_vod_info&vod_id=$vodId") as? JsonObject ?: return@withContext null
         val info = root.getAsJsonObject("info") ?: root
-
         MediaItem(
             id = vodId,
             name = info.str("name") ?: info.str("movie_name") ?: "Movie",
@@ -201,7 +181,6 @@ class XtreamClient {
             addedAt = info.addedTimestamp()
         )
     }
-
     suspend fun getSeries(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
         val arr = getJson(creds, "get_series") as? JsonArray ?: return@withContext emptyList()
         arr.mapNotNull { e ->
@@ -224,36 +203,61 @@ class XtreamClient {
             )
         }
     }
-
-
     suspend fun getSeriesEpisodes(creds: Credentials, seriesId: String): List<SeriesEpisode> = withContext(Dispatchers.IO) {
         val base = creds.server.trimEnd('/')
         val u = URLEncoder.encode(creds.username, "UTF-8")
         val p = URLEncoder.encode(creds.password, "UTF-8")
         val targetUrl = "$base/player_api.php?username=$u&password=$p&action=get_series_info&series_id=$seriesId"
-
         val req = Request.Builder()
             .url(RELAY_URL)
             .header("X-Target-URL", targetUrl)
             .build()
-
-        // Stream-parse the JSON to avoid OOM on massive series (500-1000+ episodes).
-        // The full response can be 5-10MB; loading it into a Gson tree uses 50-100MB
-        // and OOMs on Fire Stick. JsonReader reads tokens one at a time and we build
-        // SeriesEpisode objects incrementally, keeping memory usage flat.
-        try {
-            http.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) return@withContext emptyList<SeriesEpisode>()
-                val body = res.body ?: return@withContext emptyList<SeriesEpisode>()
-                val reader = JsonReader(body.charStream())
-                reader.isLenient = true
-                return@withContext streamParseEpisodes(reader, seriesId, base, creds)
+        // Aggressive retry to mirror XCIPTV's behavior. The IPTV provider
+        // intermittently drops connections, times out, or returns empty
+        // bodies for the bigger series — XCIPTV masks this by retrying
+        // until the data actually comes through, and that's what we do
+        // here too. Giving up after a single attempt shows "No episodes
+        // available" too eagerly when a retry would have succeeded.
+        //
+        // 5 attempts with progressive backoff (1s, 2s, 3s, 4s between).
+        // OkHttp's own connect+read timeout (12s + 30s = up to 42s) bounds
+        // each attempt. Typical success is on the first or second attempt;
+        // the higher retries cover sustained provider hiccups.
+        //
+        // Empty bodies are treated as transient failures and retried.
+        // Genuinely empty series are rare; the worst case is that an
+        // actually-empty series takes the full retry budget before showing
+        // "No episodes available" — acceptable trade-off for fewer false
+        // negatives on real series.
+        val maxAttempts = 5
+        for (attempt in 1..maxAttempts) {
+            try {
+                http.newCall(req).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val body = res.body
+                        if (body != null) {
+                            val reader = JsonReader(body.charStream())
+                            reader.isLenient = true
+                            val episodes = streamParseEpisodes(reader, seriesId, base, creds)
+                            if (episodes.isNotEmpty()) {
+                                return@withContext episodes
+                            }
+                        }
+                    }
+                }
+            } catch (_: Throwable) {
+                // Network / parse error — fall through to retry.
             }
-        } catch (_: Throwable) {
-            return@withContext emptyList<SeriesEpisode>()
+            if (attempt < maxAttempts) {
+                // Cancellable delay (respects coroutine cancellation from
+                // MainViewModel's withTimeoutOrNull wrapper).
+                delay(attempt * 1000L)
+            }
         }
+        // All attempts exhausted. Return empty so the UI shows
+        // "No episodes available" only after a sustained, real failure.
+        emptyList()
     }
-
     private fun streamParseEpisodes(
         reader: JsonReader,
         seriesId: String,
@@ -306,7 +310,6 @@ class XtreamClient {
         }
         return episodes.sortedWith(compareBy<SeriesEpisode> { it.seasonNumber }.thenBy { it.episodeNumber })
     }
-
     private fun readEpisodeObject(
         reader: JsonReader,
         seriesId: String,
@@ -324,7 +327,6 @@ class XtreamClient {
         var rating: String? = null
         var releaseDate: String? = null
         var extension = "mp4"
-
         try {
             reader.beginObject()
             while (reader.hasNext()) {
@@ -374,7 +376,6 @@ class XtreamClient {
         } catch (_: Throwable) {
             return null
         }
-
         if (id == null) return null
         return SeriesEpisode(
             id = id!!,
@@ -390,7 +391,6 @@ class XtreamClient {
             streamUrl = "$base/series/${creds.username}/${creds.password}/$id.$extension"
         )
     }
-
     private fun readStringSafe(reader: JsonReader): String? {
         return try {
             when (reader.peek()) {
@@ -405,7 +405,6 @@ class XtreamClient {
             null
         }
     }
-
     private suspend fun categories(creds: Credentials, action: String): List<Category> = withContext(Dispatchers.IO) {
         val arr = getJson(creds, action) as? JsonArray ?: return@withContext emptyList()
         arr.mapNotNull { e ->
@@ -416,7 +415,6 @@ class XtreamClient {
             else Category(id, name)
         }
     }
-
     companion object {
         // HTTPS relay that forwards API requests to the Xtream panel.
         // Hides the actual server URL from ISP traffic inspection (Xfinity,
@@ -425,20 +423,17 @@ class XtreamClient {
         // from any regular HTTPS website visit.
         private const val RELAY_URL = "http://45.77.204.189:3000/"
     }
-
     private fun getJson(creds: Credentials, action: String?): JsonElement? {
         val base = creds.server.trimEnd('/')
         val u = URLEncoder.encode(creds.username, "UTF-8")
         val p = URLEncoder.encode(creds.password, "UTF-8")
         val a = action?.let { "&action=$it" } ?: ""
         val targetUrl = "$base/player_api.php?username=$u&password=$p$a"
-
         // Route through the HTTPS relay to bypass ISP blocking.
         val req = Request.Builder()
             .url(RELAY_URL)
             .header("X-Target-URL", targetUrl)
             .build()
-
         // Retry once on transient connection errors (e.g. "unexpected end
         // of stream") which are common with overloaded Xtream panels.
         var lastException: Exception? = null
@@ -448,9 +443,7 @@ class XtreamClient {
                     if (!res.isSuccessful) error("HTTP ${res.code}")
                     val body = res.body?.string().orEmpty().trim()
                     if (body.isBlank()) return null
-
                     val parsed = parseLenient(body)
-
                     // Some Xtream panels return JSON arrays/objects as quoted strings.
                     // Example: "[{...}]" instead of [{...}]
                     if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
@@ -459,7 +452,6 @@ class XtreamClient {
                             return parseLenient(s)
                         }
                     }
-
                     return parsed
                 }
             } catch (e: Exception) {
@@ -472,8 +464,6 @@ class XtreamClient {
         }
         throw lastException ?: RuntimeException("Request failed")
     }
-
-
     /** Parse JSON leniently — tolerates BOMs, stray characters, and other
      *  quirks that some Xtream provider panels inject into their responses. */
     private fun parseLenient(json: String): JsonElement {
@@ -481,7 +471,6 @@ class XtreamClient {
         reader.isLenient = true
         return JsonParser.parseReader(reader)
     }
-
     private fun JsonObject.addedTimestamp(): Long? {
         val raw = str("added")
             ?: str("added_on")
@@ -494,19 +483,15 @@ class XtreamClient {
             ?: str("releasedate")
             ?: str("year")
             ?: return null
-
         val cleaned = raw.trim()
         if (cleaned.isBlank()) return null
-
         cleaned.toLongOrNull()?.let { value ->
             // Xtream usually returns Unix seconds. If milliseconds are provided, keep them.
             return if (value > 9_999_999_999L) value else value * 1000L
         }
-
         val year = Regex("""\b(19|20)\d{2}\b""").find(cleaned)?.value?.toLongOrNull()
         return year?.let { it * 10_000_000_000L }
     }
-
     private fun JsonObject.str(key: String): String? {
         if (!has(key) || get(key).isJsonNull) return null
         val value = get(key)
@@ -515,7 +500,6 @@ class XtreamClient {
             else -> null
         }
     }
-
     private fun JsonObject.firstStringFromArrayOrPrimitive(key: String): String? {
         if (!has(key) || get(key).isJsonNull) return null
         val value = get(key)

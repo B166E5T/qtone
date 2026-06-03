@@ -223,7 +223,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val baseSeries = _state.value.series.firstOrNull { it.id == seriesId }
 
                 // Do not let a slow IPTV provider hang the detail screen forever.
-                val providerEpisodes = withTimeoutOrNull(12000) {
+                val providerEpisodes = withTimeoutOrNull(180_000L) {
                     client.getSeriesEpisodes(_state.value.credentials, seriesId)
                 }.orEmpty()
 
