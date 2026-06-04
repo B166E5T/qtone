@@ -1371,7 +1371,15 @@ private fun LiveLayout(
 
     val context = LocalContext.current
     val liveKeyboard = LocalSoftwareKeyboardController.current
-    val player = remember { ExoPlayer.Builder(context).build() }
+    val player = remember {
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
+            .setExtensionRendererMode(
+                androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+            )
+        android.util.Log.i("Qtone", "Live TV FFmpeg available: " +
+            androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable())
+        ExoPlayer.Builder(context, renderersFactory).build()
+    }
 
     DisposableEffect(Unit) {
         onDispose { player.release() }

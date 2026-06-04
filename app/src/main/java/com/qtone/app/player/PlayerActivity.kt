@@ -155,7 +155,53 @@ class PlayerActivity : ComponentActivity() {
             .setAllowCrossProtocolRedirects(true)
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this)
             .setDataSourceFactory(httpDataSourceFactory)
-        player = ExoPlayer.Builder(this).setMediaSourceFactory(mediaSourceFactory).build().also { exo ->
+
+        // FFmpeg audio decoder activation.
+        //
+        // DefaultRenderersFactory with EXTENSION_RENDERER_MODE_ON tells
+        // ExoPlayer to look for and PREPEND any installed renderer
+        // extensions to its default renderer chain. With our
+        // media3-decoder-ffmpeg.aar on the classpath, this means
+        // FfmpegAudioRenderer gets asked FIRST whether it can handle each
+        // audio track. For codecs FFmpeg supports (AC-3, E-AC-3, MP2,
+        // and the rest of the list compiled into the AAR), FFmpeg takes
+        // the track. For everything else, ExoPlayer falls through to
+        // the platform MediaCodec audio renderer.
+        //
+        // Net effect:
+        //   - Channels that were silently failing because the phone's
+        //     hardware decoder lacked AC-3 / E-AC-3 / MP2 now have
+        //     audio routed through the FFmpeg software decoder.
+        //   - AAC / MP3 / Opus / etc. continue going through hardware
+        //     because the platform handles them efficiently.
+        //   - Fire TV behavior is unchanged in practice because its
+        //     hardware decoder already supports AC-3, so FFmpeg is
+        //     bypassed for those tracks — but it's available as a
+        //     safety net.
+        //
+        // EXTENSION_RENDERER_MODE_PREFER would force FFmpeg to handle
+        // every codec it can, even when hardware could. We don't want
+        // that — hardware decoders are more efficient on battery and
+        // CPU. _ON is the right choice.
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(this)
+            .setExtensionRendererMode(
+                androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+            )
+
+        // One-time diagnostic. Filter Logcat by "Qtone" tag to verify
+        // FFmpeg loaded successfully:
+        //   adb logcat -s Qtone
+        // Expected output on first run: "FFmpeg extension available: true"
+        // If it prints "false", the AAR is in the project but the native
+        // .so files aren't being packaged — check android.packagingOptions
+        // in build.gradle.kts isn't excluding **/*.so.
+        android.util.Log.i(
+            "Qtone",
+            "FFmpeg extension available: " +
+                androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable()
+        )
+
+        player = ExoPlayer.Builder(this, renderersFactory).setMediaSourceFactory(mediaSourceFactory).build().also { exo ->
             fun loadUrl(playUrl: String, seekMs: Long = 0L) {
                 exo.setMediaItem(
                     MediaItem.Builder()

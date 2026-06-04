@@ -19,8 +19,8 @@ android {
         //   versionName: human-readable label shown in About / Settings and in
         //     the update prompt's "Version X is available" text.
         // BUMP versionCode by 1 EVERY release. Never reuse a value.
-        versionCode = 116
-        versionName = "1.0.16"
+        versionCode = 117
+        versionName = "1.0.17"
     }
 
     compileOptions {
@@ -105,6 +105,26 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+
+    // Media3 FFmpeg audio decoder extension (built from source against
+    // Media3 1.4.1, FFmpeg 6.0). The AAR sits in app/libs/ and contains
+    // libffmpegJNI.so for armeabi-v7a, arm64-v8a, x86, and x86_64.
+    //
+    // Compiled-in decoders: ac3, eac3, mp2, mp3, aac, vorbis, opus, flac,
+    // alac, pcm_alaw, pcm_mulaw. AC-3 / E-AC-3 / MP2 are the actual
+    // problem-solvers for IPTV channels that played silently on phones
+    // (the phone's hardware decoder doesn't ship with Dolby support; Fire
+    // TV usually does, which is why those channels worked on Fire TV).
+    //
+    // Activation: PlayerActivity constructs ExoPlayer with a
+    // DefaultRenderersFactory whose extensionRendererMode is set to ON.
+    // The library auto-discovers FfmpegAudioRenderer via reflection from
+    // this AAR's classpath, prepends it to the audio renderer chain, and
+    // routes any track whose codec the platform refuses to handle through
+    // FFmpeg instead. AAC / MP3 / etc. continue going through hardware
+    // decoders because the platform handles them fine.
+    implementation(files("libs/media3-decoder-ffmpeg.aar"))
+
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")

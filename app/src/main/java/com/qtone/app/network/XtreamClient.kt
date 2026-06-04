@@ -126,19 +126,77 @@ class XtreamClient {
     suspend fun getSeriesCategories(creds: Credentials): List<Category> =
         categories(creds, "get_series_categories")
     suspend fun getLiveStreams(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
-        val arr = getJson(creds, "get_live_streams") as? JsonArray ?: return@withContext emptyList()
-        arr.mapNotNull { e ->
-            val o = e.asJsonObject
-            val id = o.str("stream_id") ?: return@mapNotNull null
-            MediaItem(
-                id = id,
-                name = o.str("name") ?: "Channel",
-                streamType = "live",
-                categoryId = o.str("category_id") ?: "",
-                poster = o.str("stream_icon"),
-                streamUrl = "${creds.server.trimEnd('/')}/live/${creds.username}/${creds.password}/$id.ts"
-            )
+        // Streaming JSON parser with atomic per-element parsing.
+        //
+        // Reads the array from the network stream one element at a time.
+        // Each element is parsed atomically via JsonParser.parseReader(),
+        // which reads one complete JSON value from the stream and returns
+        // it as a JsonElement tree. If the value is malformed (e.g.
+        // unescaped characters in stream_icon at channel #44296), the
+        // parser throws — but the stream has been consumed past that
+        // element, so the reader is ready for the next one.
+        //
+        // This is strictly better than field-by-field beginObject/endObject
+        // parsing, which leaves the reader in a corrupted nesting state if
+        // an error occurs between beginObject and endObject.
+        //
+        // Memory: each individual channel object is tiny (~500 bytes as a
+        // JsonObject tree), parsed and immediately converted to a MediaItem,
+        // then the JsonObject is GC'd. We never hold the entire 45K-element
+        // JSON tree in memory — only the resulting List<MediaItem>.
+        val base = creds.server.trimEnd('/')
+        val u = URLEncoder.encode(creds.username, "UTF-8")
+        val p = URLEncoder.encode(creds.password, "UTF-8")
+        val targetUrl = "$base/player_api.php?username=$u&password=$p&action=get_live_streams"
+        val req = Request.Builder()
+            .url(RELAY_URL)
+            .header("X-Target-URL", targetUrl)
+            .build()
+        val items = mutableListOf<MediaItem>()
+        for (attempt in 1..2) {
+            try {
+                http.newCall(req).execute().use { res ->
+                    if (!res.isSuccessful) return@use
+                    val body = res.body ?: return@use
+                    val reader = JsonReader(body.charStream())
+                    reader.isLenient = true
+                    if (reader.peek() == com.google.gson.stream.JsonToken.BEGIN_ARRAY) {
+                        reader.beginArray()
+                        while (reader.hasNext()) {
+                            try {
+                                val element = JsonParser.parseReader(reader)
+                                if (element.isJsonObject) {
+                                    val o = element.asJsonObject
+                                    val id = o.str("stream_id")
+                                    if (id != null) {
+                                        items.add(MediaItem(
+                                            id = id,
+                                            name = o.str("name") ?: "Channel",
+                                            streamType = "live",
+                                            categoryId = o.str("category_id") ?: "",
+                                            poster = o.str("stream_icon"),
+                                            streamUrl = "$base/live/${creds.username}/${creds.password}/$id.ts"
+                                        ))
+                                    }
+                                }
+                            } catch (_: Throwable) {
+                                // Malformed channel entry. JsonParser may or may
+                                // not have consumed the broken element. Try
+                                // skipValue to advance past any remaining garbage.
+                                // If that also fails, the reader is unrecoverable —
+                                // break and return whatever we collected so far.
+                                try { reader.skipValue() } catch (_: Throwable) { break }
+                            }
+                        }
+                        try { reader.endArray() } catch (_: Throwable) {}
+                    }
+                }
+                if (items.isNotEmpty()) return@withContext items
+            } catch (_: Exception) {
+                if (attempt < 2) Thread.sleep(1500)
+            }
         }
+        items
     }
     suspend fun getMovies(creds: Credentials): List<MediaItem> = withContext(Dispatchers.IO) {
         val arr = getJson(creds, "get_vod_streams") as? JsonArray ?: return@withContext emptyList()
