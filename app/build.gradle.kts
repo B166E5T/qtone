@@ -19,8 +19,8 @@ android {
         //   versionName: human-readable label shown in About / Settings and in
         //     the update prompt's "Version X is available" text.
         // BUMP versionCode by 1 EVERY release. Never reuse a value.
-        versionCode = 118
-        versionName = "1.0.18"
+        versionCode = 119
+        versionName = "1.0.19"
     }
 
     compileOptions {
@@ -44,6 +44,9 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 
@@ -123,7 +126,7 @@ dependencies {
     // routes any track whose codec the platform refuses to handle through
     // FFmpeg instead. AAC / MP3 / etc. continue going through hardware
     // decoders because the platform handles them fine.
-    implementation(files("libs/media3-decoder-ffmpeg.aar"))
+    implementation(files("libs/media3-decoder-ffmpeg.jar"))
 
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

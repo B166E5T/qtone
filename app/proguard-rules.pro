@@ -70,3 +70,4 @@
 # Keep FFmpeg audio decoder extension — R8 strips it because
 # ExoPlayer discovers it via reflection, which R8 cannot see.
 -keep class androidx.media3.decoder.ffmpeg.** { *; }
+
