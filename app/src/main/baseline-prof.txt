@@ -1,0 +1,122 @@
+# Baseline Profile for Qtone IPTV
+#
+# This file tells Android's ART runtime which classes and methods to
+# pre-compile into native machine code at install time (AOT compilation).
+# Without this, the JIT compiler has to discover and optimize these code
+# paths at runtime, causing jank during the first few minutes of use —
+# especially noticeable on lower-powered hardware like Fire TV Stick.
+#
+# The profileinstaller library (already in build.gradle.kts) reads this
+# file from the APK and applies it during the first launch after install.
+# Subsequent launches benefit from the pre-compiled code immediately.
+#
+# Format: HSPMethodSignature or HSPClassDescriptor
+#   H = Hot (frequently called)
+#   S = Startup (called during app startup)
+#   P = Post-startup (called shortly after startup)
+#
+# Rules use wildcards:
+#   ** = any class/package
+#   * = any method name
+#   (**) = any parameter list
+
+# ── Qtone app classes ─────────────────────────────────────────────────
+# All of these are on the critical startup + browsing path.
+HSPLcom/qtone/app/MainActivity;->**(**)**
+HSPLcom/qtone/app/MainViewModel;->**(**)**
+HSPLcom/qtone/app/MainViewModel$**;->**(**)**
+HSPLcom/qtone/app/ui/ComponentsKt;->**(**)**
+HSPLcom/qtone/app/ui/ComponentsKt$**;->**(**)**
+HSPLcom/qtone/app/ui/QtoneColors;->**(**)**
+HSPLcom/qtone/app/ui/DeviceUtilKt;->**(**)**
+HSPLcom/qtone/app/model/MediaItem;->**(**)**
+HSPLcom/qtone/app/model/Category;->**(**)**
+HSPLcom/qtone/app/model/UiState;->**(**)**
+HSPLcom/qtone/app/model/Section;->**(**)**
+HSPLcom/qtone/app/model/Credentials;->**(**)**
+HSPLcom/qtone/app/model/SeriesEpisode;->**(**)**
+HSPLcom/qtone/app/network/XtreamClient;->**(**)**
+HSPLcom/qtone/app/network/XtreamClient$**;->**(**)**
+HSPLcom/qtone/app/network/TmdbClient;->**(**)**
+HSPLcom/qtone/app/network/TmdbClient$**;->**(**)**
+HSPLcom/qtone/app/storage/SessionStore;->**(**)**
+HSPLcom/qtone/app/player/PlayerActivity;->**(**)**
+HSPLcom/qtone/app/player/PlayerActivity$**;->**(**)**
+HSPLcom/qtone/app/player/PlayerActivityKt;->**(**)**
+HSPLcom/qtone/app/player/PlayerActivityKt$**;->**(**)**
+HSPLcom/qtone/app/QuickInfoPopupKt;->**(**)**
+HSPLcom/qtone/app/QuickInfoPopupKt$**;->**(**)**
+HSPLcom/qtone/app/update/UpdateChecker;->**(**)**
+HSPLcom/qtone/app/update/UpdateInstaller;->**(**)**
+HSPLcom/qtone/app/FocusedCardBounds;->**(**)**
+HSPLcom/qtone/app/QtoneApp;->**(**)**
+HSPLcom/qtone/app/UpdateAvailableDialogKt;->**(**)**
+HSPLcom/qtone/app/ui/ThemeKt;->**(**)**
+
+# ── Compose runtime ───────────────────────────────────────────────────
+# The compose runtime is the single hottest dependency in any Compose app.
+# Every recomposition, every state read, every layout pass goes through
+# these classes.
+HSPLandroidx/compose/runtime/**;->**(**)**
+HSPLandroidx/compose/ui/**;->**(**)**
+HSPLandroidx/compose/foundation/**;->**(**)**
+HSPLandroidx/compose/material3/**;->**(**)**
+HSPLandroidx/compose/animation/**;->**(**)**
+HSPLandroidx/compose/animation/core/**;->**(**)**
+
+# ── TV Compose (focus animations, TvSurface) ──────────────────────────
+HSPLandroidx/tv/material3/**;->**(**)**
+
+# ── Compose lazy layout (LazyVerticalGrid, LazyColumn, LazyRow) ──────
+# These are the scrolling containers for the poster grid, category
+# sidebar, channel list, and episode list. Smooth D-pad scrolling
+# depends on these being pre-compiled.
+HSPLandroidx/compose/foundation/lazy/**;->**(**)**
+HSPLandroidx/compose/foundation/lazy/grid/**;->**(**)**
+HSPLandroidx/compose/foundation/lazy/layout/**;->**(**)**
+
+# ── Lifecycle + ViewModel ─────────────────────────────────────────────
+HSPLandroidx/lifecycle/**;->**(**)**
+HSPLandroidx/activity/**;->**(**)**
+
+# ── Coil (image loading) ──────────────────────────────────────────────
+# Every poster tile triggers a Coil load. The decode + cache + display
+# pipeline is on the hot path during grid scrolling.
+HSPLcoil/**;->**(**)**
+HSPLcoil/compose/**;->**(**)**
+
+# ── OkHttp (network) ─────────────────────────────────────────────────
+# Used for API calls, image loading (via Coil), and relay communication.
+HSPLokhttp3/**;->**(**)**
+HSPLokio/**;->**(**)**
+
+# ── Gson (JSON parsing) ──────────────────────────────────────────────
+# The streaming JSON parser for 45K Live TV channels is CPU-intensive
+# on the Fire Tablet. Pre-compiling Gson's hot path helps.
+HSPLcom/google/gson/**;->**(**)**
+HSPLcom/google/gson/stream/**;->**(**)**
+
+# ── Media3 / ExoPlayer ───────────────────────────────────────────────
+# Player startup, track selection, and renderer pipeline.
+HSPLandroidx/media3/exoplayer/**;->**(**)**
+HSPLandroidx/media3/common/**;->**(**)**
+HSPLandroidx/media3/decoder/**;->**(**)**
+HSPLandroidx/media3/datasource/**;->**(**)**
+HSPLandroidx/media3/ui/**;->**(**)**
+HSPLandroidx/media3/extractor/**;->**(**)**
+
+# ── FFmpeg decoder extension ──────────────────────────────────────────
+HSPLandroidx/media3/decoder/ffmpeg/**;->**(**)**
+
+# ── Palette (poster color extraction for glow) ────────────────────────
+HSPLandroidx/palette/**;->**(**)**
+
+# ── Kotlin coroutines ─────────────────────────────────────────────────
+# Every suspend function, every Flow collection, every withContext call.
+HSPLkotlinx/coroutines/**;->**(**)**
+
+# ── Kotlin stdlib ─────────────────────────────────────────────────────
+HSPLkotlin/collections/**;->**(**)**
+HSPLkotlin/sequences/**;->**(**)**
+HSPLkotlin/text/**;->**(**)**
+HSPLkotlin/jvm/internal/**;->**(**)**
