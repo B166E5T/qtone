@@ -1,6 +1,6 @@
 {
-  "versionCode": 120,
-  "versionName": "1.0.20",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.20/qtone-v1.0.20.apk",
-  "changelog": "Added ffmpeg support"
+  "versionCode": 121,
+  "versionName": "1.0.21",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.21/qtone-v1.0.21.apk",
+  "changelog": "Added multiview support"
 }

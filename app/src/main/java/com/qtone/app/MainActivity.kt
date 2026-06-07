@@ -160,6 +160,7 @@ class MainActivity : ComponentActivity() {
             // or accept it to download + install.
             var updateCheck by remember { mutableStateOf<UpdateChecker.Result?>(null) }
             var updateDismissed by remember { mutableStateOf(false) }
+            var multiviewActive by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 // Single check on app start. Runs in parallel with content
                 // loading so it doesn't delay the user's first interaction.
@@ -191,6 +192,16 @@ class MainActivity : ComponentActivity() {
             }
             val similarMovieIdSnapshots = remember { mutableStateMapOf<String, List<String>>() }
             val detailBackStack = remember { mutableStateListOf<MediaItem>() }
+            if (multiviewActive) {
+                MultiviewScreen(
+                    liveCategories = state.liveCategories,
+                    liveStreams = state.live,
+                    onExit = {
+                        multiviewActive = false
+                        vm.setSection(Section.Live)
+                    }
+                )
+            } else {
             detailItem?.let { selected ->
                 BackHandler {
                     if (detailBackStack.isNotEmpty()) {
@@ -341,6 +352,7 @@ class MainActivity : ComponentActivity() {
                         onMetadataLanguage = { language -> vm.setMetadataLanguage(language) },
                         onLogout = { vm.logout() },
                         onChangeUrl = { url -> vm.changeServerUrl(url) },
+                        onMultiview = { multiviewActive = true },
                         onCheckForUpdates = {
                             lifecycleScope.launch {
                                 updateDismissed = false
@@ -408,6 +420,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+            } // end else (multiviewActive)
         }
     }
     private fun similarMoviesFor(selected: MediaItem, allMovies: List<MediaItem>): List<MediaItem> {
@@ -521,6 +534,7 @@ private fun AppShell(
     onMetadataLanguage: (String) -> Unit,
     onLogout: () -> Unit,
     onChangeUrl: (String) -> Unit,
+    onMultiview: () -> Unit,
     onCheckForUpdates: () -> Unit,
     // Quick-info popup integration. Plumbed straight through to PosterLayout.
     // See QuickInfoPopup.kt for behavior contract.
@@ -700,6 +714,7 @@ private fun AppShell(
                 onMetadataLanguage = onMetadataLanguage,
                 onLogout = onLogout,
                 onChangeUrl = onChangeUrl,
+                onMultiview = onMultiview,
                 onCheckForUpdates = onCheckForUpdates
             )
         }
@@ -1304,6 +1319,7 @@ private fun SettingsScreen(
     onMetadataLanguage: (String) -> Unit,
     onLogout: () -> Unit,
     onChangeUrl: (String) -> Unit,
+    onMultiview: () -> Unit,
     onCheckForUpdates: () -> Unit
 ) {
     val expirationText = remember(accountExpirationMs) {
@@ -1326,6 +1342,15 @@ private fun SettingsScreen(
                 onMetadataLanguage("es-MX")
             }
         }
+        Spacer(Modifier.height(22.dp))
+        SettingsSectionTitle("Multiview")
+        Text(
+            "Watch two Live TV channels side by side.",
+            color = QtoneColors.Muted,
+            fontSize = 13.sp
+        )
+        Spacer(Modifier.height(10.dp))
+        PurpleButton("Launch Multiview", onClick = onMultiview)
         Spacer(Modifier.height(22.dp))
         SettingsSectionTitle("App Update")
         Text(
