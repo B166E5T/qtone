@@ -541,7 +541,7 @@ class XtreamClient {
         // this flag flips to true and all subsequent requests go directly
         // to the provider. Avoids the 12-second timeout per request that
         // would make the app feel frozen. Resets on next app launch.
-        @Volatile private var relayDown = false
+        @Volatile private var relayDown = true
     }
     private fun getJson(creds: Credentials, action: String?): JsonElement? {
         val base = creds.server.trimEnd('/')
