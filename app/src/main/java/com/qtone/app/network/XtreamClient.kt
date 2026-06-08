@@ -148,12 +148,14 @@ class XtreamClient {
         val u = URLEncoder.encode(creds.username, "UTF-8")
         val p = URLEncoder.encode(creds.password, "UTF-8")
         val targetUrl = "$base/player_api.php?username=$u&password=$p&action=get_live_streams"
-        val req = Request.Builder()
+        val relayReq = Request.Builder()
             .url(RELAY_URL)
             .header("X-Target-URL", targetUrl)
             .build()
+        val directReq = Request.Builder().url(targetUrl).build()
         val items = mutableListOf<MediaItem>()
         for (attempt in 1..2) {
+            val req = if (relayDown) directReq else relayReq
             try {
                 http.newCall(req).execute().use { res ->
                     if (!res.isSuccessful) return@use
@@ -193,6 +195,45 @@ class XtreamClient {
                 }
                 if (items.isNotEmpty()) return@withContext items
             } catch (_: Exception) {
+                if (attempt == 2 && !relayDown) {
+                    relayDown = true
+                    // One more attempt via direct
+                    try {
+                        http.newCall(directReq).execute().use { res ->
+                            if (res.isSuccessful) {
+                                val body = res.body ?: return@use
+                                val reader = JsonReader(body.charStream())
+                                reader.isLenient = true
+                                if (reader.peek() == com.google.gson.stream.JsonToken.BEGIN_ARRAY) {
+                                    reader.beginArray()
+                                    while (reader.hasNext()) {
+                                        try {
+                                            val element = JsonParser.parseReader(reader)
+                                            if (element.isJsonObject) {
+                                                val o = element.asJsonObject
+                                                val id = o.str("stream_id")
+                                                if (id != null) {
+                                                    items.add(MediaItem(
+                                                        id = id,
+                                                        name = o.str("name") ?: "Channel",
+                                                        streamType = "live",
+                                                        categoryId = o.str("category_id") ?: "",
+                                                        poster = o.str("stream_icon"),
+                                                        streamUrl = "$base/live/${creds.username}/${creds.password}/$id.ts"
+                                                    ))
+                                                }
+                                            }
+                                        } catch (_: Throwable) {
+                                            try { reader.skipValue() } catch (_: Throwable) { break }
+                                        }
+                                    }
+                                    try { reader.endArray() } catch (_: Throwable) {}
+                                }
+                            }
+                        }
+                        if (items.isNotEmpty()) return@withContext items
+                    } catch (_: Throwable) {}
+                }
                 if (attempt < 2) Thread.sleep(1500)
             }
         }
@@ -266,10 +307,11 @@ class XtreamClient {
         val u = URLEncoder.encode(creds.username, "UTF-8")
         val p = URLEncoder.encode(creds.password, "UTF-8")
         val targetUrl = "$base/player_api.php?username=$u&password=$p&action=get_series_info&series_id=$seriesId"
-        val req = Request.Builder()
+        val relayReq = Request.Builder()
             .url(RELAY_URL)
             .header("X-Target-URL", targetUrl)
             .build()
+        val directReq = Request.Builder().url(targetUrl).build()
         // Aggressive retry to mirror XCIPTV's behavior. The IPTV provider
         // intermittently drops connections, times out, or returns empty
         // bodies for the bigger series — XCIPTV masks this by retrying
@@ -289,6 +331,7 @@ class XtreamClient {
         // negatives on real series.
         val maxAttempts = 5
         for (attempt in 1..maxAttempts) {
+            val req = if (relayDown) directReq else relayReq
             try {
                 http.newCall(req).execute().use { res ->
                     if (res.isSuccessful) {
@@ -312,8 +355,23 @@ class XtreamClient {
                 delay(attempt * 1000L)
             }
         }
-        // All attempts exhausted. Return empty so the UI shows
-        // "No episodes available" only after a sustained, real failure.
+        // If relay was being used and all attempts failed, try direct
+        if (!relayDown) {
+            relayDown = true
+            try {
+                http.newCall(directReq).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val body = res.body
+                        if (body != null) {
+                            val reader = JsonReader(body.charStream())
+                            reader.isLenient = true
+                            val episodes = streamParseEpisodes(reader, seriesId, base, creds)
+                            if (episodes.isNotEmpty()) return@withContext episodes
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
         emptyList()
     }
     private fun streamParseEpisodes(
@@ -477,9 +535,13 @@ class XtreamClient {
         // HTTPS relay that forwards API requests to the Xtream panel.
         // Hides the actual server URL from ISP traffic inspection (Xfinity,
         // Spectrum, AT&T) which block plain HTTP requests to IPTV panels.
-        // The ISP sees encrypted traffic to Render.com — indistinguishable
-        // from any regular HTTPS website visit.
         private const val RELAY_URL = "http://45.77.204.189:3000/"
+
+        // When the relay is unreachable (server down, Vultr issues, etc.),
+        // this flag flips to true and all subsequent requests go directly
+        // to the provider. Avoids the 12-second timeout per request that
+        // would make the app feel frozen. Resets on next app launch.
+        @Volatile private var relayDown = false
     }
     private fun getJson(creds: Credentials, action: String?): JsonElement? {
         val base = creds.server.trimEnd('/')
@@ -494,33 +556,60 @@ class XtreamClient {
             .build()
         // Retry once on transient connection errors (e.g. "unexpected end
         // of stream") which are common with overloaded Xtream panels.
+        // Try relay first (unless we already know it's down).
+        // If relay fails, fall back to direct connection to the provider.
+        // This ensures the app works even when the relay server is
+        // completely unreachable (Vultr outage, account issues, etc.).
         var lastException: Exception? = null
-        for (attempt in 1..2) {
-            try {
-                http.newCall(req).execute().use { res ->
-                    if (!res.isSuccessful) error("HTTP ${res.code}")
-                    val body = res.body?.string().orEmpty().trim()
-                    if (body.isBlank()) return null
-                    val parsed = parseLenient(body)
-                    // Some Xtream panels return JSON arrays/objects as quoted strings.
-                    // Example: "[{...}]" instead of [{...}]
-                    if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
-                        val s = parsed.asString.trim()
-                        if (s.startsWith("{") || s.startsWith("[")) {
-                            return parseLenient(s)
+        if (!relayDown) {
+            for (attempt in 1..2) {
+                try {
+                    http.newCall(req).execute().use { res ->
+                        if (!res.isSuccessful) error("HTTP ${res.code}")
+                        val body = res.body?.string().orEmpty().trim()
+                        if (body.isBlank()) return null
+                        val parsed = parseLenient(body)
+                        if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
+                            val s = parsed.asString.trim()
+                            if (s.startsWith("{") || s.startsWith("[")) {
+                                return parseLenient(s)
+                            }
                         }
+                        return parsed
                     }
-                    return parsed
-                }
-            } catch (e: Exception) {
-                lastException = e
-                if (attempt < 2) {
-                    // Brief pause before retry
-                    Thread.sleep(1500)
+                } catch (e: Exception) {
+                    lastException = e
+                    if (attempt < 2) {
+                        Thread.sleep(1500)
+                    }
                 }
             }
+            // Relay failed after 2 attempts — mark it down so subsequent
+            // requests skip the relay entirely (no more 12s timeouts).
+            relayDown = true
         }
-        throw lastException ?: RuntimeException("Request failed")
+        // Direct connection fallback — goes straight to the provider.
+        // Works for users without ISP blocking. Users WITH ISP blocking
+        // (Xfinity Advanced Security, etc.) will still fail, but that's
+        // better than ALL users failing.
+        val directReq = Request.Builder().url(targetUrl).build()
+        try {
+            http.newCall(directReq).execute().use { res ->
+                if (!res.isSuccessful) error("HTTP ${res.code}")
+                val body = res.body?.string().orEmpty().trim()
+                if (body.isBlank()) return null
+                val parsed = parseLenient(body)
+                if (parsed.isJsonPrimitive && parsed.asJsonPrimitive.isString) {
+                    val s = parsed.asString.trim()
+                    if (s.startsWith("{") || s.startsWith("[")) {
+                        return parseLenient(s)
+                    }
+                }
+                return parsed
+            }
+        } catch (e: Exception) {
+            throw lastException ?: e
+        }
     }
     /** Parse JSON leniently — tolerates BOMs, stray characters, and other
      *  quirks that some Xtream provider panels inject into their responses. */
