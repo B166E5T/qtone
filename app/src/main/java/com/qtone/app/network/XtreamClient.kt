@@ -535,13 +535,13 @@ class XtreamClient {
         // HTTPS relay that forwards API requests to the Xtream panel.
         // Hides the actual server URL from ISP traffic inspection (Xfinity,
         // Spectrum, AT&T) which block plain HTTP requests to IPTV panels.
-        private const val RELAY_URL = "http://45.77.204.189:3000/"
+        private const val RELAY_URL = "http://45.79.130.95:3000/"
 
         // When the relay is unreachable (server down, Vultr issues, etc.),
         // this flag flips to true and all subsequent requests go directly
         // to the provider. Avoids the 12-second timeout per request that
         // would make the app feel frozen. Resets on next app launch.
-        @Volatile private var relayDown = true
+        @Volatile private var relayDown = false
     }
     private fun getJson(creds: Credentials, action: String?): JsonElement? {
         val base = creds.server.trimEnd('/')
