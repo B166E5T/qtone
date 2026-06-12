@@ -1013,7 +1013,17 @@ private fun LiveLayout(
             .setExtensionRendererMode(
                 androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
             )
-        ExoPlayer.Builder(context, renderersFactory).build()
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15_000,    // minBufferMs: keep at least 15s buffered
+                50_000,    // maxBufferMs: buffer up to 50s ahead
+                2_500,     // bufferForPlaybackMs: 2.5s before initial playback (unchanged from default — fast channel load)
+                5_000      // bufferForPlaybackAfterRebufferMs: 5s before resuming after a stall
+            )
+            .build()
+        ExoPlayer.Builder(context, renderersFactory)
+            .setLoadControl(loadControl)
+            .build()
     }
     DisposableEffect(Unit) {
         onDispose { player.release() }

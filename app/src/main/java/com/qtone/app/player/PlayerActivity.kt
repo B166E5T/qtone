@@ -201,7 +201,18 @@ class PlayerActivity : ComponentActivity() {
                 androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable()
         )
 
-        player = ExoPlayer.Builder(this, renderersFactory).setMediaSourceFactory(mediaSourceFactory).build().also { exo ->
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15_000,    // minBufferMs: keep at least 15s buffered
+                50_000,    // maxBufferMs: buffer up to 50s ahead
+                2_500,     // bufferForPlaybackMs: 2.5s before initial playback (unchanged from default)
+                5_000      // bufferForPlaybackAfterRebufferMs: 5s before resuming after a stall
+            )
+            .build()
+        player = ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
+            .build().also { exo ->
             fun loadUrl(playUrl: String, seekMs: Long = 0L) {
                 exo.setMediaItem(
                     MediaItem.Builder()
