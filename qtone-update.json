@@ -1,6 +1,6 @@
 {
-  "versionCode": 126,
-  "versionName": "1.0.26",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.26/qtone-v1.0.26.apk",
-  "changelog": "buffer size increase for exoplayer"
+  "versionCode": 127,
+  "versionName": "1.0.27",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.27/qtone-v1.0.27.apk",
+  "changelog": "large episode metadata + OkHttp+DoH on Exoplayer fix"
 }

@@ -19,8 +19,8 @@ android {
         //   versionName: human-readable label shown in About / Settings and in
         //     the update prompt's "Version X is available" text.
         // BUMP versionCode by 1 EVERY release. Never reuse a value.
-        versionCode = 126
-        versionName = "1.0.26"
+        versionCode = 127
+        versionName = "1.0.27"
     }
 
     compileOptions {
@@ -108,6 +108,10 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+    // OkHttp-backed datasource for ExoPlayer. Lets us route stream
+    // traffic through our OkHttp client (with DoH, Q/1.0 user agent,
+    // and shared connection pool) instead of the platform HTTP stack.
+    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
 
     // Media3 FFmpeg audio decoder extension (built from source against
     // Media3 1.4.1, FFmpeg 6.0). The AAR sits in app/libs/ and contains

@@ -111,8 +111,26 @@ fun MultiviewScreen(
     }
 
     // Two independent ExoPlayer instances — one per box.
-    val leftPlayer = remember { ExoPlayer.Builder(context, renderersFactory).build() }
-    val rightPlayer = remember { ExoPlayer.Builder(context, renderersFactory).build() }
+    // Both use the shared OkHttp+DoH client for stream HTTP.
+    val mvDataSourceFactory = remember {
+        androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+            com.qtone.app.network.SharedHttp.client
+        ).setUserAgent("Q/1.0")
+    }
+    val mvMediaSourceFactory = remember {
+        androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(mvDataSourceFactory)
+    }
+    val leftPlayer = remember {
+        ExoPlayer.Builder(context, renderersFactory)
+            .setMediaSourceFactory(mvMediaSourceFactory)
+            .build()
+    }
+    val rightPlayer = remember {
+        ExoPlayer.Builder(context, renderersFactory)
+            .setMediaSourceFactory(mvMediaSourceFactory)
+            .build()
+    }
 
     DisposableEffect(Unit) {
         onDispose {

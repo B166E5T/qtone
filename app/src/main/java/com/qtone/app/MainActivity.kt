@@ -483,7 +483,12 @@ class MainActivity : ComponentActivity() {
                 putExtra("year", item.year.orEmpty())
                 putExtra("plot", item.plot.orEmpty())
                 if (episodes.isNotEmpty() && episodeIndex >= 0) {
-                    putExtra("episodes_json", com.google.gson.Gson().toJson(episodes))
+                    // Stash episodes list in PlayerActivity's companion object
+                    // instead of serializing into the Intent. Large series
+                    // (e.g. Grey's Anatomy, 450+ episodes) exceed Android's
+                    // ~500 KB Binder transaction limit when serialized via
+                    // putExtra and crash the activity launch.
+                    com.qtone.app.player.PlayerActivity.PENDING_EPISODES = episodes
                     putExtra("episode_index", episodeIndex)
                 }
             })
@@ -1021,7 +1026,15 @@ private fun LiveLayout(
                 5_000      // bufferForPlaybackAfterRebufferMs: 5s before resuming after a stall
             )
             .build()
+        // Use OkHttp + DoH for stream HTTP. Same singleton client as
+        // XtreamClient and PlayerActivity. Bypasses system DNS.
+        val liveDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+            com.qtone.app.network.SharedHttp.client
+        ).setUserAgent("Q/1.0")
+        val liveMediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(liveDataSourceFactory)
         ExoPlayer.Builder(context, renderersFactory)
+            .setMediaSourceFactory(liveMediaSourceFactory)
             .setLoadControl(loadControl)
             .build()
     }

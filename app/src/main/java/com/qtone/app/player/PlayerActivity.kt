@@ -71,6 +71,18 @@ import kotlin.math.max
 import java.util.Locale
 
 class PlayerActivity : ComponentActivity() {
+    companion object {
+        // Episodes list for auto-play-next. Stored statically instead of
+        // serialized into the Intent because large series (e.g. Grey's
+        // Anatomy with 450+ episodes) exceed Android's ~500 KB Binder
+        // transaction limit and would crash the activity launch.
+        //
+        // MainActivity sets this immediately before starting the activity.
+        // PlayerActivity reads it on creation and then clears the reference
+        // to let the list be garbage collected when the user exits.
+        @Volatile var PENDING_EPISODES: List<com.qtone.app.model.SeriesEpisode>? = null
+    }
+
     private var player: ExoPlayer? = null
 
     // Mutable tracking for auto-play-next-episode.
@@ -106,16 +118,15 @@ class PlayerActivity : ComponentActivity() {
         currentPlot.value = plot
 
         // Parse episode list for auto-play-next
-        val episodesJson = intent.getStringExtra("episodes_json").orEmpty()
-        if (episodesJson.isNotBlank()) {
-            try {
-                val type = object : com.google.gson.reflect.TypeToken<List<com.qtone.app.model.SeriesEpisode>>() {}.type
-                episodesList = com.google.gson.Gson().fromJson(episodesJson, type)
-                currentEpisodeIndex = intent.getIntExtra("episode_index", -1)
-            } catch (_: Exception) {
-                episodesList = emptyList()
-                currentEpisodeIndex = -1
-            }
+        // Read episodes from the static companion reference rather than
+        // the Intent. See note on PENDING_EPISODES for why. Clear the
+        // reference immediately so the list can be GC'd when the user
+        // exits playback.
+        val pending = PENDING_EPISODES
+        PENDING_EPISODES = null
+        if (pending != null) {
+            episodesList = pending
+            currentEpisodeIndex = intent.getIntExtra("episode_index", -1)
         }
 
         val progressPrefix = when (streamType) {
@@ -150,9 +161,13 @@ class PlayerActivity : ComponentActivity() {
         }
         var movieFallbackIndex = 0
 
-        val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setUserAgent("Q/1.0")
-            .setAllowCrossProtocolRedirects(true)
+        // Use our shared OkHttp client (with DoH) for stream HTTP.
+        // Bypasses Fire OS's corrupted system DNS resolver and avoids
+        // ISP DNS-level blocking. User-Agent ("Q/1.0") is added by the
+        // SharedHttp interceptor — no need to set it here.
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+            com.qtone.app.network.SharedHttp.client
+        ).setUserAgent("Q/1.0")
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this)
             .setDataSourceFactory(httpDataSourceFactory)
 
