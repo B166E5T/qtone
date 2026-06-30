@@ -1,6 +1,6 @@
 {
-  "versionCode": 127,
-  "versionName": "1.0.27",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.27/qtone-v1.0.27.apk",
-  "changelog": "large episode metadata + OkHttp+DoH on Exoplayer fix"
+  "versionCode": 128,
+  "versionName": "1.0.28",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.28/qtone-v1.0.28.apk",
+  "changelog": "Added persistent favorites on logout and expiration check on open or update"
 }

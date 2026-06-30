@@ -476,8 +476,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        // No re-verification needed — if the user is inside the app they
-        // already authenticated successfully. Just refresh the content.
+        // Expiration re-verification now lives in refreshContent(), so both
+        // this Update button AND the app-open auto-update path get the same
+        // "bounce expired accounts to login" behavior.
         refreshContent(creds, manual = true)
     }
 
@@ -490,6 +491,56 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         imageWarmupJob?.cancel()
 
         viewModelScope.launch {
+            // ── Account re-verification ──────────────────────────────
+            // Before loading content, confirm the account is still valid.
+            // An expired/disabled account returns empty Live/Movies/Series
+            // lists, which used to fill the progress bars instantly to
+            // 0/0/0 and strand the user in an empty app. Now we re-run
+            // login() and, if the provider says the account is expired or
+            // the credentials are rejected, we send the user to the login
+            // screen instead.
+            //
+            // This runs for BOTH entry points:
+            //   - opening the app (manual = false)
+            //   - pressing Update (manual = true)
+            //
+            // Transient network errors are NOT treated as expiration — we
+            // only bounce to login on the provider's explicit expiry /
+            // invalid-credentials messages. On a network blip we leave the
+            // user where they are (on cached content if they have it).
+            val verifyResult = try {
+                withContext(Dispatchers.IO) { client.login(creds) }
+            } catch (_: Exception) {
+                // Couldn't even reach the server to verify. Treat as
+                // transient: don't kick the user out. Fall through to the
+                // content load, which has its own timeouts and error UI.
+                null
+            }
+            if (verifyResult != null) {
+                val isAccountProblem =
+                    verifyResult.contains("expired", ignoreCase = true) ||
+                    verifyResult.contains("invalid credentials", ignoreCase = true)
+                if (isAccountProblem) {
+                    // Real account problem — send the user to login. Keep
+                    // credentials saved so the fields stay populated, and
+                    // do NOT touch favorites / watch history.
+                    _state.value = _state.value.copy(
+                        loggedIn = false,
+                        loading = false,
+                        updating = false,
+                        error = verifyResult
+                    )
+                    return@launch
+                }
+                // Otherwise it's a transient/network message from login().
+                // Don't log the user out. If this was a manual update, show
+                // the message; if it was app-open auto-update, stay quiet
+                // and leave them on whatever content is already loaded.
+                if (manual) {
+                    _state.value = _state.value.copy(updating = false, error = verifyResult)
+                }
+                return@launch
+            }
             try {
                 _state.value = _state.value.copy(
                     loading = false,

@@ -387,6 +387,40 @@ class SessionStore(private val context: Context) {
     }
 
     fun clearSession() {
+        // Preserve all durable user data across logout. Previously this
+        // called prefs.edit().clear() which wiped EVERYTHING — favorites,
+        // watch history, continue-watching positions, TMDB metadata cache,
+        // credentials, and language preference. That was the cause of
+        // "favorites reset to zero" after a logout.
+        //
+        // We now keep every durable key and only remove transient session
+        // markers. Durable keys preserved:
+        //   - live_favorites / movie_favorites / series_favorites
+        //   - server / username / password (credentials)
+        //   - account_expiration_ms
+        //   - metadata_language
+        //   - watched_episodes
+        //   - movie_position_* / movie_duration_* (continue watching)
+        //   - movie_meta_v2_* / series_tmdb_meta_v3_* (TMDB cache)
+        //   - similar_v1_* (similar movies cache)
+        //
+        // Transient keys cleared:
+        //   - last_update_ms (forces a fresh content pull on next login)
+        prefs.edit()
+            .remove("last_update_ms")
+            .apply()
+        // Note: we intentionally do NOT delete cacheDir here anymore.
+        // The TMDB metadata cache and downloaded images live there and are
+        // expensive to rebuild; keeping them makes re-login fast. If you
+        // ever need a hard reset, that's what uninstall / factory reset is.
+    }
+
+    /**
+     * Hard reset — wipes ALL stored data including favorites and
+     * credentials. NOT used by logout. Provided only for an explicit
+     * "reset app data" action if one is ever added to Settings.
+     */
+    fun clearEverything() {
         prefs.edit().clear().apply()
         try { cacheDir.deleteRecursively(); cacheDir.mkdirs() } catch (_: Throwable) {}
     }
