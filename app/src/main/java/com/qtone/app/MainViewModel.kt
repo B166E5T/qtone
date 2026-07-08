@@ -94,6 +94,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         if (store.hasCache()) {
             loadCache(creds, favorites)
+            revalidateExpiration(creds)
             if (store.shouldAutoUpdate()) {
                 refreshContent(creds, manual = false)
             }
@@ -466,6 +467,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Lightweight expiration re-check. Fetches ONLY the account expiration
+     * timestamp, saves it, and updates state. Much cheaper than
+     * refreshContent(), so it can run on launch, on resume, and hourly.
+     * Makes the nav-bar expiration color self-correct after a renewal.
+     * Failures are swallowed so a network blip never disrupts the user.
+     */
+    fun revalidateExpiration(creds: Credentials = _state.value.credentials) {
+        val c = creds.takeIf {
+            it.server.isNotBlank() && it.username.isNotBlank() && it.password.isNotBlank()
+        } ?: store.getCredentials()
+        if (c.server.isBlank() || c.username.isBlank() || c.password.isBlank()) return
+
+        viewModelScope.launch {
+            val fresh = try {
+                withTimeoutOrNull(10_000L) {
+                    withContext(Dispatchers.IO) { client.getAccountExpirationMs(c) }
+                }
+            } catch (_: Exception) {
+                null
+            }
+            if (fresh != null && fresh != _state.value.accountExpirationMs) {
+                store.saveAccountExpirationMs(fresh)
+                _state.value = _state.value.copy(accountExpirationMs = fresh)
+            }
+        }
+    }
+
     fun manualUpdate() {
         val creds = _state.value.credentials.takeIf {
             it.server.isNotBlank() && it.username.isNotBlank() && it.password.isNotBlank()
@@ -541,6 +570,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 return@launch
             }
+
+            // Account is valid. Refresh the stored expiration timestamp so
+            // the nav-bar color signal self-corrects after a renewal — even
+            // on the app-open path where the user didn't press Update.
+            val freshExpiration = withTimeoutOrNull(12_000L) {
+                withContext(Dispatchers.IO) { client.getAccountExpirationMs(creds) }
+            }
+            if (freshExpiration != null) {
+                store.saveAccountExpirationMs(freshExpiration)
+                _state.value = _state.value.copy(accountExpirationMs = freshExpiration)
+            }
+
             try {
                 _state.value = _state.value.copy(
                     loading = false,

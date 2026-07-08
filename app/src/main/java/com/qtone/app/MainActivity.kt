@@ -100,6 +100,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            // Hourly foreground poll: keep the expiration (and its nav-bar
+            // color signal) fresh even if the app is left open for a long
+            // time while the account is renewed elsewhere. Tied to the
+            // composition, so it stops when the activity is destroyed.
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(60L * 60L * 1000L) // 1 hour
+                    vm.revalidateExpiration()
+                }
+            }
             val state by vm.state.collectAsState()
             var detailItem by remember { mutableStateOf<MediaItem?>(null) }
             var initialSimilarFocusId by remember { mutableStateOf<String?>(null) }
@@ -458,6 +468,10 @@ class MainActivity : ComponentActivity() {
         launchingPlayerActivity = false
         vm.refreshMovieContinueWatching()
         vm.refreshWatchedEpisodes()
+        // Re-check the account expiration whenever the app returns to the
+        // foreground so the nav-bar color signal self-corrects right after
+        // a renewal (covers cold launch and return-from-background).
+        vm.revalidateExpiration()
     }
     override fun onStop() {
         super.onStop()
@@ -617,6 +631,7 @@ private fun AppShell(
         if (!liveFullscreenActive) {
             TopNav(
                 selected = state.section,
+                accountExpirationMs = state.accountExpirationMs,
                 onSection = { target ->
                     dismissKeyboardOnly()
                     if (target == Section.Search) {
@@ -726,7 +741,23 @@ private fun AppShell(
     }
 }
 @Composable
-private fun TopNav(selected: Section, onSection: (Section) -> Unit, onUpdate: () -> Unit) {
+private fun TopNav(selected: Section, accountExpirationMs: Long?, onSection: (Section) -> Unit, onUpdate: () -> Unit) {
+    // Live-computed warning tint for nav text based on expiration proximity.
+    // null = normal color. Amber at 2-3 days, red at <=1 day or expired.
+    // No persistent state: recomputes every render, so renewing the account
+    // (which updates accountExpirationMs) clears the tint automatically.
+    val expiryTint: Color? = run {
+        if (accountExpirationMs == null) return@run null
+        val msLeft = accountExpirationMs - System.currentTimeMillis()
+        val dayMs = 24L * 60L * 60L * 1000L
+        val daysLeft = Math.ceil(msLeft.toDouble() / dayMs).toInt()
+        when {
+            msLeft <= 0L -> Color(0xFFE05656)      // expired -> red
+            daysLeft <= 1 -> Color(0xFFE05656)     // <=1 day -> red
+            daysLeft in 2..3 -> Color(0xFFE0A100)  // 2-3 days -> amber
+            else -> null                            // >3 days -> normal
+        }
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -738,21 +769,21 @@ private fun TopNav(selected: Section, onSection: (Section) -> Unit, onUpdate: ()
             .padding(horizontal = 48.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        CompactTopButton("Live TV", selected == Section.Live) { onSection(Section.Live) }
+        CompactTopButton("Live TV", selected == Section.Live, expiryTint) { onSection(Section.Live) }
         Spacer(Modifier.weight(1f))
-        CompactTopButton("Movies", selected == Section.Movies) { onSection(Section.Movies) }
+        CompactTopButton("Movies", selected == Section.Movies, expiryTint) { onSection(Section.Movies) }
         Spacer(Modifier.weight(1f))
-        CompactTopButton("Series", selected == Section.Series) { onSection(Section.Series) }
+        CompactTopButton("Series", selected == Section.Series, expiryTint) { onSection(Section.Series) }
         Spacer(Modifier.weight(1.4f))
-        CompactTopButton("Search", selected == Section.Search) { onSection(Section.Search) }
+        CompactTopButton("Search", selected == Section.Search, expiryTint) { onSection(Section.Search) }
         Spacer(Modifier.weight(1f))
-        CompactTopButton("Update", false) { onUpdate() }
+        CompactTopButton("Update", false, expiryTint) { onUpdate() }
         Spacer(Modifier.weight(1f))
-        CompactTopButton("Settings", selected == Section.Settings) { onSection(Section.Settings) }
+        CompactTopButton("Settings", selected == Section.Settings, expiryTint) { onSection(Section.Settings) }
     }
 }
 @Composable
-private fun CompactTopButton(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun CompactTopButton(text: String, selected: Boolean, expiryTint: Color? = null, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val pillColor by animateColorAsState(
         targetValue = if (selected) Color.White else Color.Transparent,
@@ -766,9 +797,12 @@ private fun CompactTopButton(text: String, selected: Boolean, onClick: () -> Uni
     )
     val textColor by animateColorAsState(
         targetValue = when {
+            // Selected button keeps dark text on its white pill (readable).
             selected -> Color(0xFF0A0A0E)
-            focused -> Color.White
-            else -> Color(0xCCFFFFFF)
+            // Focused: use the expiry tint if present, else white.
+            focused -> expiryTint ?: Color.White
+            // Normal: use the expiry tint if present, else the muted white.
+            else -> expiryTint ?: Color(0xCCFFFFFF)
         },
         animationSpec = tween(durationMillis = 90),
         label = "topNavTextColor"

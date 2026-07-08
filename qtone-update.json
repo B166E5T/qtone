@@ -1,6 +1,6 @@
 {
-  "versionCode": 128,
-  "versionName": "1.0.28",
-  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.28/qtone-v1.0.28.apk",
-  "changelog": "Added persistent favorites on logout and expiration check on open or update"
+  "versionCode": 129,
+  "versionName": "1.0.29",
+  "apkUrl": "https://github.com/B166E5T/qtone/releases/download/v1.0.29/qtone-v1.0.29.apk",
+  "changelog": "Color alerts for expiring accounts"
 }
