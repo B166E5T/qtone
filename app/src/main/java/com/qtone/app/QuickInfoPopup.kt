@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -206,15 +207,35 @@ fun QuickInfoPopup(
                 )
 
                 // META ROW
+                //
+                // Year, rating, and genre are joined into a single line.
+                // The rating is colored by value (see ratingColor) while
+                // year, genre, and the separators keep the original muted
+                // color — so we build an AnnotatedString and apply the
+                // color to just the rating span.
                 val metaPieces = buildList {
-                    item.year?.takeIf { it.isNotBlank() }?.let { add(it) }
-                    item.rating?.takeIf { it.isNotBlank() }?.let { add("★ $it") }
-                    item.genre?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    item.year?.takeIf { it.isNotBlank() }?.let { add(it to null) }
+                    item.rating?.takeIf { it.isNotBlank() }?.let {
+                        add("★ $it" to com.qtone.app.ui.ratingColor(it))
+                    }
+                    item.genre?.takeIf { it.isNotBlank() }?.let { add(it to null) }
                 }
                 if (metaPieces.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
+                    val metaText = androidx.compose.ui.text.buildAnnotatedString {
+                        metaPieces.forEachIndexed { index, (piece, pieceColor) ->
+                            if (index > 0) append("  ·  ")
+                            if (pieceColor != null) {
+                                withStyle(
+                                    androidx.compose.ui.text.SpanStyle(color = pieceColor)
+                                ) { append(piece) }
+                            } else {
+                                append(piece)
+                            }
+                        }
+                    }
                     Text(
-                        text = metaPieces.joinToString("  ·  "),
+                        text = metaText,
                         color = Color(0xCCFFFFFF),
                         fontSize = 12.sp,
                         lineHeight = 16.sp,

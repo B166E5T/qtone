@@ -1204,9 +1204,29 @@ private fun InfoLabel(label: String, value: String) {
     }
 }
 
+/**
+ * Maps a TMDB rating string (e.g. "7.4") to a color so the number itself
+ * carries meaning at a glance:
+ *   >= 7.0     green   — worth watching
+ *   5.5 - 6.9  amber   — middling
+ *   <  5.5     red     — poor
+ * Returns null when the value is blank or unparseable, in which case the
+ * caller keeps its existing color. Thresholds chosen because TMDB ratings
+ * cluster in the 6-7.5 band; 7.0/5.5 gives a real spread across a typical
+ * catalog instead of everything landing on one color.
+ */
+fun ratingColor(rating: String?): Color? {
+    val v = rating?.trim()?.toFloatOrNull() ?: return null
+    return when {
+        v >= 7.0f -> Color(0xFF5FBF5F)   // green
+        v >= 5.5f -> Color(0xFFE0A100)   // amber (matches nav expiry amber)
+        else -> Color(0xFFE05656)        // red   (matches nav expiry red)
+    }
+}
+
 @Composable
-private fun MetaChip(text: String) {
-    Text(text, color = QtoneColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.background(Color(0x663C3742), RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 5.dp))
+private fun MetaChip(text: String, textColor: Color = QtoneColors.Text) {
+    Text(text, color = textColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.background(Color(0x663C3742), RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 5.dp))
 }
 
 @Composable
@@ -1424,7 +1444,9 @@ fun MovieDetailScreen(
                 Spacer(Modifier.height(7.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    item.rating?.takeIf { it.isNotBlank() }?.let { MetaChip("TMDB ${it.take(3)}") }
+                    item.rating?.takeIf { it.isNotBlank() }?.let {
+                        MetaChip("TMDB ${it.take(3)}", ratingColor(it) ?: QtoneColors.Text)
+                    }
                     item.year?.takeIf { it.isNotBlank() }?.let { MetaChip(it.take(4)) }
                     item.genre?.takeIf { it.isNotBlank() }?.let { MetaChip(it.take(36)) }
                 }
