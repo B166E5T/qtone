@@ -147,7 +147,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     name = cached.name.takeIf { it.isNotBlank() } ?: item.name,
                     poster = item.poster,
                     backdrop = item.backdrop,
-                    rating = cached.rating?.takeIf { it.isNotBlank() } ?: item.rating,
+                    // TMDB rating ONLY — no provider fallback. The provider's
+                    // series rating frequently disagrees with TMDB's by enough
+                    // to cross a color threshold, which made the border flip
+                    // color after the user opened the item. Series we haven't
+                    // enriched yet simply stay white until TMDB fills in.
+                    rating = cached.rating?.takeIf { it.isNotBlank() },
                     year = cached.year?.takeIf { it.isNotBlank() } ?: item.year,
                     plot = cached.plot?.takeIf { it.isNotBlank() } ?: item.plot,
                     genre = cached.genre?.takeIf { it.isNotBlank() } ?: item.genre,
@@ -156,6 +161,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
             } else {
                 item.copy(
+                    // Rating intentionally cleared. The provider's series
+                    // rating often disagrees with TMDB's by enough to cross a
+                    // color threshold, which made borders visibly flip color
+                    // after the user opened an item. Starting neutral (white)
+                    // and coloring once TMDB enrichment lands is cleaner.
                     rating = null,
                     year = null,
                     plot = null,
@@ -370,6 +380,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * (U+FEFF) that are invisible on screen but break authentication
      * when URL-encoded and sent to Xtream panels.
      */
+    /**
+     * Normalizes a server URL to always use the http:// scheme.
+     *
+     * A mistyped scheme (htt://, htpp://, http:/, https://, or none)
+     * still logs in — the relay parses host:port and connects itself —
+     * but ExoPlayer plays streams DIRECTLY and needs a valid URL, so a
+     * bad scheme causes a black screen on playback while login works.
+     * Forcing a clean http:// here fixes both paths at the source.
+     *
+     * Per project setup the provider is always http (never https), so we
+     * force http:// even if the user typed https://.
+     */
+    private fun normalizeServerUrl(raw: String): String {
+        val cleaned = sanitizeInput(raw).trim()
+        if (cleaned.isBlank()) return cleaned
+        // Strip anything up to and including "://" (a scheme, valid or
+        // malformed). If there's no "://", substringAfter returns the
+        // whole string unchanged, so a scheme-less entry is handled too.
+        val hostAndPath = if (cleaned.contains("://")) {
+            cleaned.substringAfter("://")
+        } else {
+            cleaned
+        }
+        // Also guard against a lone leading slash or two (e.g. "http//host"
+        // becomes "http//host" -> no "://" -> falls here; strip stray
+        // leading slashes just in case).
+        val stripped = hostAndPath.trimStart('/')
+        return "http://" + stripped
+    }
+
     private fun sanitizeInput(raw: String): String {
         return raw
             .replace("\uFEFF", "")   // BOM
@@ -384,7 +424,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun login(server: String, username: String, password: String) {
-        val normalizedServer = sanitizeInput(server).trimEnd('/')
+        val normalizedServer = normalizeServerUrl(server).trimEnd('/')
         val creds = Credentials(normalizedServer, sanitizeInput(username), sanitizeInput(password))
         if (creds.server.isBlank() || creds.username.isBlank() || creds.password.isBlank()) {
             _state.value = _state.value.copy(error = "Please enter server, username, and password.")
@@ -429,7 +469,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             it.username.isNotBlank() && it.password.isNotBlank()
         } ?: store.getCredentials()
 
-        val normalizedServer = server.trim().trimEnd('/')
+        val normalizedServer = normalizeServerUrl(server).trimEnd('/')
         val creds = current.copy(server = normalizedServer)
 
         if (creds.server.isBlank() || creds.username.isBlank() || creds.password.isBlank()) {
@@ -645,7 +685,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } ?: throw RuntimeException("Series update timed out.")
                 // Do not block Update by reading thousands of cached TMDB records here.
                 // Provider/Xtream series data is applied immediately; TMDB metadata is refreshed lazily/background.
-                val series = seriesFresh
+                // Clear provider ratings on fresh series so the grid starts
+                // neutral (white) and only colors once TMDB enrichment runs.
+                // Keeps the fresh-install case consistent with the cached case.
+                val series = seriesFresh.map { it.copy(rating = null) }
                 seriesMetaCache.clear()
                 series.filter { item -> hasUsefulSeriesInfo(item) }.forEach { item -> seriesMetaCache[item.id] = item }
                 animateProgress { p -> _state.value = _state.value.copy(seriesProgress = p) }
@@ -1203,6 +1246,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * from a previous session, populates the UI immediately (0ms) without
      * any network call. Only goes to the network on a cache miss.
      */
+    /**
+     * Prefer the TMDB-enriched version of each similar movie when we already
+     * have it cached, so the tile's rating (and therefore its border color)
+     * matches what the detail screen will show. Falls back to the provider
+     * item when no enriched version exists — no extra network is performed.
+     */
+    private fun withEnrichedRatings(items: List<MediaItem>): List<MediaItem> =
+        items.map { m ->
+            val enriched = movieMetaCache[m.id]
+            // Already enriched: use the TMDB rating (matches what the detail
+            // screen will show). Not enriched yet: clear the provider rating
+            // so the tile starts white rather than showing a color that would
+            // change once the user opens it.
+            if (enriched != null && !enriched.rating.isNullOrBlank()) enriched
+            else m.copy(rating = null)
+        }
+
     private fun launchSimilarMoviesWithId(itemId: String, tmdbId: Int, language: String) {
         if (_similarMoviesByItemId.value.containsKey(itemId)) return
         if (similarJobsByItemId[itemId]?.isActive == true) return
@@ -1211,7 +1271,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val cachedIds = try { store.getSimilarMovieIds(itemId) } catch (_: Throwable) { null }
         if (cachedIds != null) {
             val catalog = _state.value.movies
-            val matches = cachedIds.mapNotNull { mid -> catalog.firstOrNull { it.id == mid } }
+            val matches = withEnrichedRatings(cachedIds.mapNotNull { mid -> catalog.firstOrNull { it.id == mid } })
             _similarMoviesByItemId.value =
                 _similarMoviesByItemId.value + (itemId to matches)
             return
@@ -1229,10 +1289,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
 
-                val matches = matchRecommendationsToProvider(
-                    recommendations = recommendations,
-                    catalog = _state.value.movies,
-                    excludeId = itemId
+                val matches = withEnrichedRatings(
+                    matchRecommendationsToProvider(
+                        recommendations = recommendations,
+                        catalog = _state.value.movies,
+                        excludeId = itemId
+                    )
                 )
 
                 _similarMoviesByItemId.value =
@@ -1261,7 +1323,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val cachedIds = try { store.getSimilarMovieIds(item.id) } catch (_: Throwable) { null }
         if (cachedIds != null) {
             val catalog = _state.value.movies
-            val matches = cachedIds.mapNotNull { mid -> catalog.firstOrNull { it.id == mid } }
+            val matches = withEnrichedRatings(cachedIds.mapNotNull { mid -> catalog.firstOrNull { it.id == mid } })
             _similarMoviesByItemId.value =
                 _similarMoviesByItemId.value + (item.id to matches)
             return
@@ -1292,10 +1354,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
 
-                val matches = matchRecommendationsToProvider(
-                    recommendations = recommendations,
-                    catalog = _state.value.movies,
-                    excludeId = item.id
+                val matches = withEnrichedRatings(
+                    matchRecommendationsToProvider(
+                        recommendations = recommendations,
+                        catalog = _state.value.movies,
+                        excludeId = item.id
+                    )
                 )
 
                 _similarMoviesByItemId.value =
@@ -1331,7 +1395,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val cachedIds = try { store.getSimilarMovieIds(item.id) } catch (_: Throwable) { null }
         if (cachedIds != null) {
             val catalog = _state.value.movies
-            val matches = cachedIds.mapNotNull { mid -> catalog.firstOrNull { it.id == mid } }
+            val matches = withEnrichedRatings(cachedIds.mapNotNull { mid -> catalog.firstOrNull { it.id == mid } })
             _similarMoviesByItemId.value =
                 _similarMoviesByItemId.value + (item.id to matches)
             return

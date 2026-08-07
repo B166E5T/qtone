@@ -250,7 +250,19 @@ class MainActivity : ComponentActivity() {
                 val similarMoviesFromVm by vm.similarMoviesByItemId.collectAsState()
                 val watchedEpisodes by vm.watchedEpisodeIds.collectAsState()
                 val stableSimilarMovies = if (selected.streamType == "movie") {
-                    similarMoviesFromVm[selected.id].orEmpty()
+                    // Map each similar entry to its CURRENT copy from state so
+                    // the tile reflects any TMDB enrichment that has happened
+                    // since the similar list was built. Without this, opening a
+                    // similar movie (which enriches it) and pressing Back left
+                    // the tile showing the stale, rating-less snapshot — so its
+                    // border stayed white instead of taking the rating color.
+                    // state.movies is observed, so Back triggers a recompose
+                    // and the color appears.
+                    similarMoviesFromVm[selected.id].orEmpty().map { sim ->
+                        state.movies.firstOrNull {
+                            it.id == sim.id && !it.rating.isNullOrBlank()
+                        } ?: sim
+                    }
                 } else {
                     emptyList()
                 }

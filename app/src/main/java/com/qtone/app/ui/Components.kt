@@ -853,7 +853,19 @@ fun MoviePosterTile(
     // that does not trigger relayout. So even though the animation value lives
     // in Compose state, the visible motion is hardware-accelerated.
     var focused by remember { mutableStateOf(false) }
-    val glowColor = if (showGlow) rememberDominantColor(item.poster, focused) else DEFAULT_GLOW_COLOR
+    // Focus glow color now reflects the TMDB rating instead of the
+    // poster's dominant color: green (>=7.0), amber (5.5-6.9), red (<5.5),
+    // and a neutral white glow when the item has no rating. Uses the same
+    // ratingColor() helper as the rating text, so a poster's glow and its
+    // rating number always agree.
+    // Border tint is ALWAYS rating-based (green/amber/red, white when
+    // unrated), regardless of showGlow. The glow color, by contrast, is
+    // only meaningful when showGlow is true; when false it falls back to
+    // DEFAULT_GLOW_COLOR but is never drawn. Keeping these separate means
+    // the similar-movies section (showGlow=false) still gets a rating
+    // border instead of the purple DEFAULT_GLOW_COLOR.
+    val borderTint = ratingColor(item.rating) ?: Color.White
+    val glowColor = if (showGlow) borderTint else DEFAULT_GLOW_COLOR
     val animatedScale by animateFloatAsState(
         targetValue = if (focused) focusedScale else 1.0f,
         animationSpec = spring(
@@ -935,12 +947,13 @@ fun MoviePosterTile(
             glow = Glow(elevationColor = Color.Transparent, elevation = 0.dp),
             focusedGlow = Glow(elevationColor = Color.Transparent, elevation = 0.dp)
         ),
-        // Focus indication = thin white outline. No border at rest (the poster
-        // image edge defines the card on a black background). On focus a
-        // 2dp bright white outline appears — Nextv's exact pattern.
+        // Focus indication = colored outline matching the rating glow.
+        // glowColor is already ratingColor-based (green/amber/red, or white
+        // when unrated), so the border and the glow always agree. No border
+        // at rest; on focus a 2dp rating-colored outline appears.
         border = ClickableSurfaceDefaults.border(
             border = TvBorder(border = BorderStroke(0.dp, Color.Transparent)),
-            focusedBorder = TvBorder(border = BorderStroke(2.dp, Color.White))
+            focusedBorder = TvBorder(border = BorderStroke(2.dp, borderTint))
         )
     ) {
         // Nextv-style: poster fills the entire card. No title strip, no year.
@@ -1217,6 +1230,10 @@ private fun InfoLabel(label: String, value: String) {
  */
 fun ratingColor(rating: String?): Color? {
     val v = rating?.trim()?.toFloatOrNull() ?: return null
+    // Unrated items commonly arrive as "0" / "0.0" (especially series with
+    // lazily-loaded metadata). Treat 0 or negative as "no rating" so the
+    // caller uses its neutral (white) fallback instead of showing red.
+    if (v <= 0f) return null
     return when {
         v >= 7.0f -> Color(0xFF5FBF5F)   // green
         v >= 5.5f -> Color(0xFFE0A100)   // amber (matches nav expiry amber)
@@ -1823,7 +1840,9 @@ private fun SimilarMovieNarrowTile(
             },
         shape = RoundedCornerShape(8.dp),
         color = Color(0xFF07070A),
-        border = if (isActive) BorderStroke(3.dp, Color(0xFFFFFFFF)) else BorderStroke(1.dp, Color(0x22FFFFFF))
+        // Active border colored by rating (green/amber/red, white when
+        // unrated). No glow on similar tiles — border only, by request.
+        border = if (isActive) BorderStroke(3.dp, ratingColor(item.rating) ?: Color(0xFFFFFFFF)) else BorderStroke(1.dp, Color(0x22FFFFFF))
     ) {
         Column(Modifier.fillMaxSize()) {
             Box(
