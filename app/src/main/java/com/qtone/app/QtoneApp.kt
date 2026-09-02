@@ -33,6 +33,29 @@ import coil.request.CachePolicy
  */
 class QtoneApp : Application(), ImageLoaderFactory {
 
+    /**
+     * Release bitmap memory when the system reports pressure. Coil holds up
+     * to 30% of the heap in poster bitmaps; without this the app never gives
+     * any of it back, which kept the heap near its limit during playback and
+     * caused GC-induced dropped frames. VLC does the same thing (it logs
+     * onTrimMemory level 20 when its UI is hidden).
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        try {
+            val loader = coil.Coil.imageLoader(this)
+            when {
+                // UI no longer visible, or the system is under real pressure:
+                // drop the bitmap cache entirely. It rebuilds from disk.
+                level >= TRIM_MEMORY_UI_HIDDEN -> loader.memoryCache?.clear()
+                else -> { /* mild pressure — keep the cache */ }
+            }
+        } catch (_: Throwable) {
+            // Trimming is best-effort; never crash on it.
+        }
+    }
+
+
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .memoryCache {

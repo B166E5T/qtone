@@ -302,6 +302,20 @@ class PlayerActivity : ComponentActivity() {
             descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         }
 
+        // Release Coil's poster bitmap cache before playback starts.
+        // Coil is configured to hold up to 30% of the heap in bitmaps, which
+        // is right for scrolling the grid but pure overhead here — no posters
+        // are visible during playback. Holding them kept the heap near its
+        // limit and triggered repeated 300-600ms GCs that made the video
+        // renderer miss frame deadlines (measured ~8 dropped frames/sec).
+        // Posters reload from the 250MB disk cache on return, so nothing is
+        // lost visually.
+        try {
+            coil.Coil.imageLoader(this).memoryCache?.clear()
+        } catch (_: Throwable) {
+            // Never let a cache cleanup failure block playback.
+        }
+
         val playerView = PlayerView(this).apply {
             setBackgroundColor(AndroidColor.BLACK)
             this.player = this@PlayerActivity.player
