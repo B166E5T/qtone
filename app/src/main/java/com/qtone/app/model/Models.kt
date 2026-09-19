@@ -23,6 +23,11 @@ data class Category(
 data class MediaItem(
     val id: String,
     val name: String,
+    // The provider's original title, kept even after TMDB enrichment
+    // replaces `name` with the localized title. Search matches both so
+    // results don't depend on which items the user has opened before.
+    // Null on items from old caches (Gson default); search falls back to name.
+    val originalName: String? = null,
     val streamType: String,
     val categoryId: String = "",
     val poster: String? = null,

@@ -206,6 +206,7 @@ class XtreamClient {
             MediaItem(
                 id = id,
                 name = o.str("name") ?: "Movie",
+                originalName = o.str("name") ?: "Movie",
                 streamType = "movie",
                 categoryId = o.str("category_id") ?: "",
                 poster = o.str("stream_icon"),
@@ -247,6 +248,7 @@ class XtreamClient {
             MediaItem(
                 id = id,
                 name = o.str("name") ?: "Series",
+                originalName = o.str("name") ?: "Series",
                 streamType = "series",
                 categoryId = o.str("category_id") ?: "",
                 poster = o.str("cover") ?: o.str("stream_icon"),

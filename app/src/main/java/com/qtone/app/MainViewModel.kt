@@ -125,6 +125,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // Poster + backdrop stay as provider's URLs.
                 movie.copy(
                     name = cached.name.takeIf { it.isNotBlank() } ?: movie.name,
+                    // Keep the provider title so search still matches it after
+                    // the display name switches to the TMDB localized title.
+                    originalName = movie.originalName ?: movie.name,
                     poster = movie.poster,
                     backdrop = movie.backdrop,
                     rating = cached.rating?.takeIf { it.isNotBlank() } ?: movie.rating,
@@ -145,6 +148,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // Same priority as movies: TMDB cache wins, provider fills blanks.
                 item.copy(
                     name = cached.name.takeIf { it.isNotBlank() } ?: item.name,
+                    // Keep the provider title so search still matches it after
+                    // the display name switches to the TMDB localized title.
+                    originalName = item.originalName ?: item.name,
                     poster = item.poster,
                     backdrop = item.backdrop,
                     // TMDB rating ONLY — no provider fallback. The provider's
@@ -307,6 +313,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         // as provider's so the Coil cache continues to match.
                         movie.copy(
                             name = cached.name.takeIf { it.isNotBlank() } ?: movie.name,
+                            originalName = movie.originalName ?: movie.name,
                             poster = movie.poster,
                             backdrop = movie.backdrop,
                             rating = cached.rating?.takeIf { it.isNotBlank() } ?: movie.rating,
@@ -332,6 +339,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         // TMDB wins (including the localized title).
                         item.copy(
                             name = cached.name.takeIf { it.isNotBlank() } ?: item.name,
+                            originalName = item.originalName ?: item.name,
                             poster = item.poster,
                             backdrop = item.backdrop,
                             rating = cached.rating?.takeIf { it.isNotBlank() } ?: item.rating,
@@ -1695,7 +1703,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val results = if (q.length < 2) {
             emptyList()
         } else {
-            _state.value.movies.filter { it.name.contains(q, ignoreCase = true) }.take(200)
+            _state.value.movies.filter {
+                it.name.contains(q, ignoreCase = true) ||
+                    (it.originalName?.contains(q, ignoreCase = true) == true)
+            }.take(200)
         }
 
         val movieCats = withMovieSpecialCategories(
@@ -1722,7 +1733,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val results = if (q.length < 2) {
             emptyList()
         } else {
-            _state.value.series.filter { it.name.contains(q, ignoreCase = true) }.take(200)
+            _state.value.series.filter {
+                it.name.contains(q, ignoreCase = true) ||
+                    (it.originalName?.contains(q, ignoreCase = true) == true)
+            }.take(200)
         }
 
         val seriesCats = withSeriesSpecialCategories(
